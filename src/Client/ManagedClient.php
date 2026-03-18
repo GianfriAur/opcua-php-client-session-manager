@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Gianfriaur\OpcuaSessionManager\Client;
 
 use Gianfriaur\OpcuaPhpClient\Exception\ConnectionException;
-use Gianfriaur\OpcuaPhpClient\Exception\OpcUaException;
 use Gianfriaur\OpcuaPhpClient\Exception\ServiceException;
 use Gianfriaur\OpcuaPhpClient\OpcUaClientInterface;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;

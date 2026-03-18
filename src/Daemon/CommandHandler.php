@@ -7,9 +7,6 @@ namespace Gianfriaur\OpcuaSessionManager\Daemon;
 use Gianfriaur\OpcuaPhpClient\Client;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityPolicy;
-use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
-use Gianfriaur\OpcuaPhpClient\Types\NodeId;
-use Gianfriaur\OpcuaPhpClient\Types\Variant;
 use Gianfriaur\OpcuaSessionManager\Exception\SessionNotFoundException;
 use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 use Gianfriaur\OpcuaPhpClient\Types\StatusCode;
-use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
 use Gianfriaur\OpcuaSessionManager\Client\SocketConnection;
 use Gianfriaur\OpcuaSessionManager\Tests\Integration\Helpers\TestHelper;
 

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Tests\Integration\Helpers;
 
-use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
-use Gianfriaur\OpcuaSessionManager\Client\SocketConnection;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 use Gianfriaur\OpcuaPhpClient\Types\ReferenceDescription;
+use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
+use Gianfriaur\OpcuaSessionManager\Client\SocketConnection;
 
 final class TestHelper
 {
@@ -27,7 +27,7 @@ final class TestHelper
     // ── Certificate paths ───────────────────────────────────────────────
     public static function getCertsDir(): string
     {
-        $dir = getenv('OPCUA_CERTS_DIR') ?: __DIR__ . '/../../../../server/certs';
+        $dir = getenv('OPCUA_CERTS_DIR') ?: __DIR__ . '/../../../../opcua-test-server-suite/certs';
 
         return realpath($dir) ?: $dir;
     }
