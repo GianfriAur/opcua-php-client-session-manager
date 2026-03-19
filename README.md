@@ -200,7 +200,7 @@ The daemon implements multiple layers of security hardening:
 
 - **IPC authentication** — optional shared-secret token via `OPCUA_AUTH_TOKEN` env var, `--auth-token-file`, or `--auth-token`, validated with timing-safe `hash_equals()`. Recommended for production
 - **Socket permissions** — file created with `0600` by default (owner-only). Adjustable via `--socket-mode`
-- **Method whitelist** — only 18 documented OPC UA read/write methods can be invoked via `query`. `connect`/`disconnect` are restricted to `open`/`close` commands only
+- **Method whitelist** — only 32 documented OPC UA read/write/browse/state methods can be invoked via `query`. `connect`/`disconnect` are restricted to `open`/`close` commands only
 - **Credential protection** — passwords and private key paths are stripped from session data immediately after connection. The `list` command never exposes them
 - **Session limits** — configurable maximum (`--max-sessions`) to prevent resource exhaustion
 - **Certificate path restrictions** — `--allowed-cert-dirs` constrains which directories the daemon reads certificates from. Without it, paths are still validated as existing regular files
@@ -234,9 +234,12 @@ $client = new ManagedClient(
 
 ## Features
 
-- **All OPC UA operations**: browse, read, write, method calls, subscriptions, history read
+- **All OPC UA operations**: browse, browseAll, browseRecursive, read, write, method calls, subscriptions, history read
+- **Path resolution**: `resolveNodeId('/Objects/Server/ServerStatus')` and `translateBrowsePaths()`
+- **Connection management**: `isConnected()`, `getConnectionState()`, `reconnect()`, configurable timeout and auto-retry
+- **Automatic batching**: transparent batching for `readMulti()`/`writeMulti()` with server limits auto-discovery
 - **Security**: Basic256Sha256, SignAndEncrypt, username/password, X.509 certificates
-- **IPC hardening**: auth token, method whitelist, input limits, credential protection
+- **IPC hardening**: auth token, method whitelist (32 methods), input limits, credential protection
 - **Session persistence**: sessions survive across PHP requests
 - **Automatic cleanup**: expired sessions are closed after inactivity timeout
 - **Graceful shutdown**: SIGTERM/SIGINT disconnect all sessions cleanly
@@ -277,16 +280,29 @@ vendor/bin/pest tests/Integration --group=integration
 vendor/bin/pest
 ```
 
-138 tests (60 unit + 78 integration) covering:
+200 tests (94 unit + 106 integration) covering:
 
-- **Connection**: anonymous, username/password, certificate, reconnect, invalid host/port
-- **Browse**: Objects, TestServer, DataTypes, Methods, inverse, continuation
-- **Read/Write**: all scalar types, arrays, readMulti, writeMulti, read-only rejection
+- **Connection**: anonymous, username/password, certificate, reconnect, invalid host/port, connection state, timeout, auto-retry
+- **Browse**: Objects, TestServer, DataTypes, Methods, inverse, continuation, browseAll, browseRecursive, BrowseDirection enum
+- **Path resolution**: resolveNodeId, translateBrowsePaths
+- **Read/Write**: all scalar types, arrays, readMulti, writeMulti, read-only rejection, batching
 - **Method calls**: Add, Multiply, Concatenate, Reverse, Echo, Failing
 - **Subscriptions**: create, monitored items, publish, delete
 - **Session persistence**: cross-instance, state persistence, isolation
-- **Type serialization**: all OPC UA types, roundtrips, edge cases
-- **Security**: method whitelist, connect/disconnect rejection, credential stripping, error sanitization, auth token (accept/reject/wrong), buffer overflow, socket permissions, max sessions, certificate path validation
+- **Type serialization**: all OPC UA types, BrowseDirection, ConnectionState, BrowseNode, roundtrips, edge cases
+- **Configuration**: timeout, auto-retry, batching, browse depth
+- **Security**: method whitelist (including setter rejection), connect/disconnect rejection, credential stripping, error sanitization, auth token (accept/reject/wrong), buffer overflow, socket permissions, max sessions, certificate path validation
+
+## Ecosystem
+
+This package is part of a broader OPC UA ecosystem for PHP:
+
+| Package | Description |
+|---------|-------------|
+| [opcua-php-client](https://github.com/GianfriAur/opcua-php-client) | Pure PHP OPC UA client library — the core protocol implementation |
+| [opcua-php-client-session-manager](https://github.com/GianfriAur/opcua-php-client-session-manager) | Session persistence daemon for PHP's request/response model (this package) |
+| [opcua-laravel-client](https://github.com/GianfriAur/opcua-laravel-client) | Laravel integration for OPC UA — service provider, facade, and configuration |
+| [opcua-test-server-suite](https://github.com/GianfriAur/opcua-test-server-suite) | Docker-based OPC UA test server suite for integration testing |
 
 ## License
 

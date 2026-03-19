@@ -9,9 +9,13 @@ use Gianfriaur\OpcuaPhpClient\Exception\ServiceException;
 use Gianfriaur\OpcuaPhpClient\OpcUaClientInterface;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityPolicy;
+use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
+use Gianfriaur\OpcuaPhpClient\Types\BrowseNode;
 use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
+use Gianfriaur\OpcuaPhpClient\Types\ConnectionState;
 use Gianfriaur\OpcuaPhpClient\Types\DataValue;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
+use Gianfriaur\OpcuaPhpClient\Types\QualifiedName;
 use Gianfriaur\OpcuaPhpClient\Types\Variant;
 use Gianfriaur\OpcuaSessionManager\Exception\DaemonException;
 use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
@@ -22,12 +26,79 @@ class ManagedClient implements OpcUaClientInterface
     private array $config = [];
     private TypeSerializer $serializer;
 
+    private float $opcuaTimeout = 5.0;
+    private ?int $autoRetry = null;
+    private ?int $batchSize = null;
+    private int $defaultBrowseMaxDepth = 10;
+
     public function __construct(
         private readonly string $socketPath = '/tmp/opcua-session-manager.sock',
         private readonly float $timeout = 30.0,
         private readonly ?string $authToken = null,
     ) {
         $this->serializer = new TypeSerializer();
+    }
+
+    public function setTimeout(float $timeout): self
+    {
+        $this->opcuaTimeout = $timeout;
+        $this->config['opcuaTimeout'] = $timeout;
+
+        return $this;
+    }
+
+    public function getTimeout(): float
+    {
+        return $this->opcuaTimeout;
+    }
+
+    public function setAutoRetry(int $maxRetries): self
+    {
+        $this->autoRetry = $maxRetries;
+        $this->config['autoRetry'] = $maxRetries;
+
+        return $this;
+    }
+
+    public function getAutoRetry(): int
+    {
+        return $this->autoRetry ?? ($this->sessionId !== null ? 1 : 0);
+    }
+
+    public function setBatchSize(int $batchSize): self
+    {
+        $this->batchSize = $batchSize;
+        $this->config['batchSize'] = $batchSize;
+
+        return $this;
+    }
+
+    public function getBatchSize(): ?int
+    {
+        return $this->batchSize;
+    }
+
+    public function getServerMaxNodesPerRead(): ?int
+    {
+        return $this->query('getServerMaxNodesPerRead', []);
+    }
+
+    public function getServerMaxNodesPerWrite(): ?int
+    {
+        return $this->query('getServerMaxNodesPerWrite', []);
+    }
+
+    public function setDefaultBrowseMaxDepth(int $maxDepth): self
+    {
+        $this->defaultBrowseMaxDepth = $maxDepth;
+        $this->config['defaultBrowseMaxDepth'] = $maxDepth;
+
+        return $this;
+    }
+
+    public function getDefaultBrowseMaxDepth(): int
+    {
+        return $this->defaultBrowseMaxDepth;
     }
 
     public function setSecurityPolicy(SecurityPolicy $policy): self
@@ -82,6 +153,15 @@ class ManagedClient implements OpcUaClientInterface
         $this->sessionId = $response['sessionId'];
     }
 
+    public function reconnect(): void
+    {
+        if ($this->sessionId === null) {
+            throw new ConnectionException('Not connected. Call connect() first.');
+        }
+
+        $this->query('reconnect', []);
+    }
+
     public function disconnect(): void
     {
         if ($this->sessionId === null) {
@@ -98,6 +178,26 @@ class ManagedClient implements OpcUaClientInterface
         }
     }
 
+    public function isConnected(): bool
+    {
+        if ($this->sessionId === null) {
+            return false;
+        }
+
+        return (bool) $this->query('isConnected', []);
+    }
+
+    public function getConnectionState(): ConnectionState
+    {
+        if ($this->sessionId === null) {
+            return ConnectionState::Disconnected;
+        }
+
+        $state = $this->query('getConnectionState', []);
+
+        return $this->serializer->deserializeConnectionState($state);
+    }
+
     public function getEndpoints(string $endpointUrl): array
     {
         $result = $this->query('getEndpoints', [$endpointUrl]);
@@ -106,15 +206,15 @@ class ManagedClient implements OpcUaClientInterface
     }
 
     public function browse(
-        NodeId $nodeId,
-        int $direction = 0,
-        ?NodeId $referenceTypeId = null,
-        bool $includeSubtypes = true,
-        int $nodeClassMask = 0,
+        NodeId          $nodeId,
+        BrowseDirection $direction = BrowseDirection::Forward,
+        ?NodeId         $referenceTypeId = null,
+        bool            $includeSubtypes = true,
+        int             $nodeClassMask = 0,
     ): array {
         $result = $this->query('browse', [
             $this->serializer->serializeNodeId($nodeId),
-            $direction,
+            $direction->value,
             $referenceTypeId !== null ? $this->serializer->serializeNodeId($referenceTypeId) : null,
             $includeSubtypes,
             $nodeClassMask,
@@ -127,15 +227,15 @@ class ManagedClient implements OpcUaClientInterface
     }
 
     public function browseWithContinuation(
-        NodeId $nodeId,
-        int $direction = 0,
-        ?NodeId $referenceTypeId = null,
-        bool $includeSubtypes = true,
-        int $nodeClassMask = 0,
+        NodeId          $nodeId,
+        BrowseDirection $direction = BrowseDirection::Forward,
+        ?NodeId         $referenceTypeId = null,
+        bool            $includeSubtypes = true,
+        int             $nodeClassMask = 0,
     ): array {
         $result = $this->query('browseWithContinuation', [
             $this->serializer->serializeNodeId($nodeId),
-            $direction,
+            $direction->value,
             $referenceTypeId !== null ? $this->serializer->serializeNodeId($referenceTypeId) : null,
             $includeSubtypes,
             $nodeClassMask,
@@ -161,6 +261,85 @@ class ManagedClient implements OpcUaClientInterface
             ),
             'continuationPoint' => $result['continuationPoint'] ?? null,
         ];
+    }
+
+    public function browseAll(
+        NodeId          $nodeId,
+        BrowseDirection $direction = BrowseDirection::Forward,
+        ?NodeId         $referenceTypeId = null,
+        bool            $includeSubtypes = true,
+        int             $nodeClassMask = 0,
+    ): array {
+        $result = $this->query('browseAll', [
+            $this->serializer->serializeNodeId($nodeId),
+            $direction->value,
+            $referenceTypeId !== null ? $this->serializer->serializeNodeId($referenceTypeId) : null,
+            $includeSubtypes,
+            $nodeClassMask,
+        ]);
+
+        return array_map(
+            fn(array $ref) => $this->serializer->deserializeReferenceDescription($ref),
+            $result,
+        );
+    }
+
+    public function browseRecursive(
+        NodeId          $nodeId,
+        BrowseDirection $direction = BrowseDirection::Forward,
+        ?int            $maxDepth = null,
+        ?NodeId         $referenceTypeId = null,
+        bool            $includeSubtypes = true,
+        int             $nodeClassMask = 0,
+    ): array {
+        $result = $this->query('browseRecursive', [
+            $this->serializer->serializeNodeId($nodeId),
+            $direction->value,
+            $maxDepth,
+            $referenceTypeId !== null ? $this->serializer->serializeNodeId($referenceTypeId) : null,
+            $includeSubtypes,
+            $nodeClassMask,
+        ]);
+
+        return array_map(
+            fn(array $node) => $this->serializer->deserializeBrowseNode($node),
+            $result,
+        );
+    }
+
+    public function translateBrowsePaths(array $browsePaths): array
+    {
+        $serializedPaths = array_map(fn(array $bp) => [
+            'startingNodeId' => $this->serializer->serializeNodeId($bp['startingNodeId']),
+            'relativePath' => array_map(fn(array $elem) => [
+                'referenceTypeId' => isset($elem['referenceTypeId'])
+                    ? $this->serializer->serializeNodeId($elem['referenceTypeId'])
+                    : null,
+                'isInverse' => $elem['isInverse'] ?? false,
+                'includeSubtypes' => $elem['includeSubtypes'] ?? true,
+                'targetName' => $this->serializer->serializeQualifiedName($elem['targetName']),
+            ], $bp['relativePath'] ?? []),
+        ], $browsePaths);
+
+        $result = $this->query('translateBrowsePaths', [$serializedPaths]);
+
+        return array_map(fn(array $pathResult) => [
+            'statusCode' => $pathResult['statusCode'],
+            'targets' => array_map(fn(array $target) => [
+                'targetId' => $this->serializer->deserializeNodeId($target['targetId']),
+                'remainingPathIndex' => $target['remainingPathIndex'],
+            ], $pathResult['targets'] ?? []),
+        ], $result);
+    }
+
+    public function resolveNodeId(string $path, ?NodeId $startingNodeId = null): NodeId
+    {
+        $result = $this->query('resolveNodeId', [
+            $path,
+            $startingNodeId !== null ? $this->serializer->serializeNodeId($startingNodeId) : null,
+        ]);
+
+        return $this->serializer->deserializeNodeId($result);
     }
 
     public function read(NodeId $nodeId, int $attributeId = 13): DataValue

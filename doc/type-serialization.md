@@ -14,6 +14,9 @@ The `TypeSerializer` converts `opcua-php-client` OPC UA types into JSON structur
 | `LocalizedText` | `{"locale": ?string, "text": ?string}` | `{"locale": "en", "text": "Server Status"}` |
 | `BuiltinType` (enum) | `int` (backed value) | `6` (Int32) |
 | `NodeClass` (enum) | `int` (backed value) | `2` (Variable) |
+| `BrowseDirection` (enum) | `int` (backed value) | `0` (Forward) |
+| `ConnectionState` (enum) | `string` (case name) | `"Connected"` |
+| `BrowseNode` | Full object | See below |
 | `DateTimeImmutable` | ISO 8601 string | `"2024-06-15T12:00:00+00:00"` |
 | `EndpointDescription` | Full object | See below |
 | Scalars (`int`, `float`, `string`, `bool`) | Unchanged | `42`, `3.14`, `"hello"`, `true` |
@@ -44,6 +47,53 @@ $json = $serializer->serializeNodeId($nodeId);
 $nodeId = $serializer->deserializeNodeId(["ns" => 2, "id" => 1001, "type" => "numeric"]);
 // NodeId(namespaceIndex=2, identifier=1001, type="numeric")
 ```
+
+## BrowseDirection
+
+The `BrowseDirection` enum is serialized as its integer backed value:
+
+| Case | Value |
+|------|-------|
+| Forward | 0 |
+| Inverse | 1 |
+| Both | 2 |
+
+## ConnectionState
+
+The `ConnectionState` enum is serialized as its case name string:
+
+| Case | Serialized |
+|------|------------|
+| Disconnected | `"Disconnected"` |
+| Connected | `"Connected"` |
+| Broken | `"Broken"` |
+
+## BrowseNode
+
+A `BrowseNode` wraps a `ReferenceDescription` with a recursive tree of children:
+
+```json
+{
+  "reference": {
+    "referenceTypeId": {"ns": 0, "id": 35, "type": "numeric"},
+    "isForward": true,
+    "nodeId": {"ns": 0, "id": 85, "type": "numeric"},
+    "browseName": {"ns": 0, "name": "Objects"},
+    "displayName": {"locale": null, "text": "Objects"},
+    "nodeClass": 1,
+    "typeDefinition": null
+  },
+  "children": [
+    {
+      "reference": { ... },
+      "children": []
+    }
+  ]
+}
+```
+
+- `reference` — A serialized `ReferenceDescription`
+- `children` — Array of nested `BrowseNode` objects (empty for leaf nodes)
 
 ## DataValue
 
@@ -185,4 +235,10 @@ $qualifiedName = $serializer->deserializeQualifiedName($json);
 $localizedText = $serializer->deserializeLocalizedText($json);
 $referenceDescription = $serializer->deserializeReferenceDescription($json);
 $builtinType = $serializer->deserializeBuiltinType(6); // BuiltinType::Int32
+
+// New in v2.0.0
+$json = $serializer->serializeBrowseNode($browseNode);
+$browseNode = $serializer->deserializeBrowseNode($json);
+$direction = $serializer->deserializeBrowseDirection(0); // BrowseDirection::Forward
+$state = $serializer->deserializeConnectionState('Connected'); // ConnectionState::Connected
 ```

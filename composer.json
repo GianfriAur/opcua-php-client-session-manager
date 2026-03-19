@@ -5,7 +5,7 @@
   "license": "MIT",
   "require": {
     "php": "^8.2",
-    "gianfriaur/opcua-php-client": "^1.1",
+    "gianfriaur/opcua-php-client": "^2.0",
     "react/event-loop": "^1.5",
     "react/socket": "^1.16"
   },

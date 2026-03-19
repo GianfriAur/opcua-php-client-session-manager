@@ -188,7 +188,7 @@ On every `query` operation, the `lastUsed` field is updated. The periodic timer 
 
 Only the following OPC UA client methods can be invoked via the `query` command:
 
-`getEndpoints`, `browse`, `browseWithContinuation`, `browseNext`, `read`, `readMulti`, `write`, `writeMulti`, `call`, `createSubscription`, `createMonitoredItems`, `createEventMonitoredItem`, `deleteMonitoredItems`, `deleteSubscription`, `publish`, `historyReadRaw`, `historyReadProcessed`, `historyReadAtTime`
+`getEndpoints`, `browse`, `browseWithContinuation`, `browseNext`, `browseAll`, `browseRecursive`, `translateBrowsePaths`, `resolveNodeId`, `read`, `readMulti`, `write`, `writeMulti`, `call`, `createSubscription`, `createMonitoredItems`, `createEventMonitoredItem`, `deleteMonitoredItems`, `deleteSubscription`, `publish`, `historyReadRaw`, `historyReadProcessed`, `historyReadAtTime`, `isConnected`, `getConnectionState`, `reconnect`, `getTimeout`, `getAutoRetry`, `getBatchSize`, `getDefaultBrowseMaxDepth`, `getServerMaxNodesPerRead`, `getServerMaxNodesPerWrite`
 
 Note: `connect` and `disconnect` are **not** in the whitelist — they can only be triggered via the `open` and `close` IPC commands, respectively. This prevents a client from reconnecting to a different server or disconnecting another session's connection.
 

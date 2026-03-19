@@ -40,6 +40,46 @@ new ManagedClient(
 
 When `$authToken` is provided, it is automatically included in every IPC request. The daemon validates it using a timing-safe comparison (`hash_equals`).
 
+## Configuration methods
+
+### Timeout
+
+```php
+$client->setTimeout(10.0); // OPC UA operation timeout (default: 5s)
+$client->getTimeout();     // Returns 10.0
+```
+
+The timeout is passed to the daemon's `Client` on `connect()` and controls OPC UA operation timeouts, not the IPC timeout.
+
+### Auto-retry
+
+```php
+$client->setAutoRetry(3);  // Max retries on ConnectionException
+$client->getAutoRetry();   // Returns 3
+```
+
+When `autoRetry` is not explicitly set, the default is `0` before `connect()` and `1` after a successful `connect()`. The retry mechanism operates inside the daemon — transparent to the PHP application.
+
+### Batching
+
+```php
+$client->setBatchSize(100);           // Max nodes per batch
+$client->getBatchSize();              // Returns 100
+$client->getServerMaxNodesPerRead();  // Auto-discovered from server
+$client->getServerMaxNodesPerWrite(); // Auto-discovered from server
+```
+
+`readMulti()` and `writeMulti()` are automatically batched when the number of items exceeds the effective batch size. `setBatchSize(0)` disables batching entirely.
+
+### Browse depth
+
+```php
+$client->setDefaultBrowseMaxDepth(20); // Default max depth for browseRecursive
+$client->getDefaultBrowseMaxDepth();   // Returns 20
+```
+
+Default is `10`. Set to `-1` for unlimited (hardcapped at 256 by the underlying client).
+
 ## Security configuration
 
 Configuration methods are identical to `Client`:
@@ -84,24 +124,36 @@ All `OpcUaClientInterface` methods are supported:
 | Method | Description |
 |--------|-------------|
 | `connect(string $endpointUrl): void` | Opens an OPC UA session via the daemon |
+| `reconnect(): void` | Reconnects the session's underlying client |
 | `disconnect(): void` | Closes the session |
+| `isConnected(): bool` | Checks if the session is connected |
+| `getConnectionState(): ConnectionState` | Returns `Disconnected`, `Connected`, or `Broken` |
 
 ### Browse
 
 | Method | Description |
 |--------|-------------|
-| `browse(NodeId, ...)` | Browse a node's children |
-| `browseWithContinuation(NodeId, ...)` | Browse with continuation point |
+| `browse(NodeId, BrowseDirection, ...)` | Browse a node's children |
+| `browseWithContinuation(NodeId, BrowseDirection, ...)` | Browse with continuation point |
 | `browseNext(string $continuationPoint)` | Continue a previous browse |
+| `browseAll(NodeId, BrowseDirection, ...)` | Browse all children, automatically following continuation points |
+| `browseRecursive(NodeId, BrowseDirection, ?int $maxDepth, ...)` | Full tree traversal with cycle detection, returns `BrowseNode[]` |
+
+### Path resolution
+
+| Method | Description |
+|--------|-------------|
+| `translateBrowsePaths(array $browsePaths)` | Translate browse paths to NodeIds |
+| `resolveNodeId(string $path, ?NodeId $startingNodeId)` | Resolve a human-readable path like `/Objects/Server/ServerStatus` |
 
 ### Read/Write
 
 | Method | Description |
 |--------|-------------|
 | `read(NodeId, int $attributeId = 13)` | Read an attribute |
-| `readMulti(array $items)` | Read multiple attributes in a single request |
+| `readMulti(array $items)` | Read multiple attributes (automatically batched) |
 | `write(NodeId, mixed $value, BuiltinType $type)` | Write a value |
-| `writeMulti(array $items)` | Write multiple values in a single request |
+| `writeMulti(array $items)` | Write multiple values (automatically batched) |
 
 ### Method Call
 
@@ -175,6 +227,8 @@ try {
 | Connection overhead | ~50-200ms (every request) | ~50-200ms (first time only) |
 | Subscription publish | Immediate notifications | Limited by synchronous IPC model |
 | Certificate paths | Relative or absolute | Absolute only (resolved by daemon) |
+| Auto-retry | Local in-process | Remote in daemon's `Client` |
+| Batching | Local in-process | Remote in daemon's `Client` |
 
 ## Session persistence across requests
 

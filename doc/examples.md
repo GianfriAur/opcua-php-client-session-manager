@@ -28,6 +28,7 @@ $client->disconnect();
 require 'vendor/autoload.php';
 
 use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
+use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 
 $client = new ManagedClient();
@@ -44,6 +45,45 @@ foreach ($refs as $ref) {
         $ref->getNodeId()->getIdentifier(),
         $ref->getNodeClass()->name,
     );
+}
+
+// Browse with direction
+$inverseRefs = $client->browse(NodeId::numeric(0, 2253), BrowseDirection::Inverse);
+$allRefs = $client->browse(NodeId::numeric(0, 2253), BrowseDirection::Both);
+
+$client->disconnect();
+```
+
+## Recursive browsing and path resolution
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+
+use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
+use Gianfriaur\OpcuaPhpClient\Types\NodeId;
+
+$client = new ManagedClient();
+$client->setDefaultBrowseMaxDepth(5);
+$client->connect('opc.tcp://localhost:4840/UA/Server');
+
+// Resolve a path to a NodeId
+$nodeId = $client->resolveNodeId('/Objects/Server/ServerStatus');
+$dv = $client->read($nodeId);
+echo "ServerStatus: " . print_r($dv->getValue(), true) . "\n";
+
+// Browse all children (follows continuation points automatically)
+$allRefs = $client->browseAll(NodeId::numeric(0, 85));
+echo "Total children of Objects: " . count($allRefs) . "\n";
+
+// Recursive tree traversal
+$tree = $client->browseRecursive(NodeId::numeric(0, 85), maxDepth: 3);
+foreach ($tree as $node) {
+    echo $node->getBrowseName()->getName() . "\n";
+    foreach ($node->getChildren() as $child) {
+        echo "  └─ " . $child->getBrowseName()->getName() . "\n";
+    }
 }
 
 $client->disconnect();

@@ -7,6 +7,7 @@ namespace Gianfriaur\OpcuaSessionManager\Daemon;
 use Gianfriaur\OpcuaPhpClient\Client;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityPolicy;
+use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
 use Gianfriaur\OpcuaSessionManager\Exception\SessionNotFoundException;
 use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
 
@@ -17,6 +18,10 @@ class CommandHandler
         'browse',
         'browseWithContinuation',
         'browseNext',
+        'browseAll',
+        'browseRecursive',
+        'translateBrowsePaths',
+        'resolveNodeId',
         'read',
         'readMulti',
         'write',
@@ -31,6 +36,15 @@ class CommandHandler
         'historyReadRaw',
         'historyReadProcessed',
         'historyReadAtTime',
+        'isConnected',
+        'getConnectionState',
+        'reconnect',
+        'getTimeout',
+        'getAutoRetry',
+        'getBatchSize',
+        'getDefaultBrowseMaxDepth',
+        'getServerMaxNodesPerRead',
+        'getServerMaxNodesPerWrite',
     ];
 
     private const MAX_ERROR_MESSAGE_LENGTH = 500;
@@ -87,6 +101,22 @@ class CommandHandler
         $this->validateCertPaths($config);
 
         $client = new Client();
+
+        if (isset($config['opcuaTimeout'])) {
+            $client->setTimeout((float) $config['opcuaTimeout']);
+        }
+
+        if (isset($config['autoRetry'])) {
+            $client->setAutoRetry((int) $config['autoRetry']);
+        }
+
+        if (isset($config['batchSize'])) {
+            $client->setBatchSize((int) $config['batchSize']);
+        }
+
+        if (isset($config['defaultBrowseMaxDepth'])) {
+            $client->setDefaultBrowseMaxDepth((int) $config['defaultBrowseMaxDepth']);
+        }
 
         if (isset($config['securityPolicy'])) {
             $client->setSecurityPolicy(SecurityPolicy::from($config['securityPolicy']));
@@ -154,6 +184,10 @@ class CommandHandler
 
         $args = $this->deserializeParams($method, $params);
         $result = $session->client->$method(...$args);
+
+        if ($result instanceof Client) {
+            return $this->success(null);
+        }
 
         return $this->success($this->serializer->serialize($result));
     }
@@ -250,22 +284,40 @@ class CommandHandler
             'getEndpoints' => [
                 (string) $params[0],
             ],
-            'browse' => [
+            'browse', 'browseWithContinuation', 'browseAll' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                (int) ($params[1] ?? 0),
+                BrowseDirection::from((int) ($params[1] ?? 0)),
                 isset($params[2]) ? $this->serializer->deserializeNodeId($params[2]) : null,
                 (bool) ($params[3] ?? true),
                 (int) ($params[4] ?? 0),
             ],
-            'browseWithContinuation' => [
+            'browseRecursive' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                (int) ($params[1] ?? 0),
-                isset($params[2]) ? $this->serializer->deserializeNodeId($params[2]) : null,
-                (bool) ($params[3] ?? true),
-                (int) ($params[4] ?? 0),
+                BrowseDirection::from((int) ($params[1] ?? 0)),
+                isset($params[2]) ? (int) $params[2] : null,
+                isset($params[3]) ? $this->serializer->deserializeNodeId($params[3]) : null,
+                (bool) ($params[4] ?? true),
+                (int) ($params[5] ?? 0),
             ],
             'browseNext' => [
                 (string) $params[0],
+            ],
+            'translateBrowsePaths' => [
+                array_map(fn(array $bp) => [
+                    'startingNodeId' => $this->serializer->deserializeNodeId($bp['startingNodeId']),
+                    'relativePath' => array_map(fn(array $elem) => [
+                        'referenceTypeId' => isset($elem['referenceTypeId'])
+                            ? $this->serializer->deserializeNodeId($elem['referenceTypeId'])
+                            : null,
+                        'isInverse' => (bool) ($elem['isInverse'] ?? false),
+                        'includeSubtypes' => (bool) ($elem['includeSubtypes'] ?? true),
+                        'targetName' => $this->serializer->deserializeQualifiedName($elem['targetName']),
+                    ], $bp['relativePath'] ?? []),
+                ], $params[0] ?? []),
+            ],
+            'resolveNodeId' => [
+                (string) $params[0],
+                isset($params[1]) ? $this->serializer->deserializeNodeId($params[1]) : null,
             ],
             'read' => [
                 $this->serializer->deserializeNodeId($params[0]),
@@ -348,6 +400,10 @@ class CommandHandler
                 $this->serializer->deserializeNodeId($params[0]),
                 array_map(fn(string $ts) => new \DateTimeImmutable($ts), $params[1]),
             ],
+            'isConnected', 'getConnectionState', 'reconnect',
+            'getTimeout', 'getAutoRetry', 'getBatchSize',
+            'getDefaultBrowseMaxDepth', 'getServerMaxNodesPerRead',
+            'getServerMaxNodesPerWrite' => [],
             default => throw new \InvalidArgumentException("Unsupported method: {$method}"),
         };
     }

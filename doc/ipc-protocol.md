@@ -141,7 +141,11 @@ Open a new OPC UA session.
     "clientKeyPath": "/path/to/key.pem",
     "caCertPath": "/path/to/ca.pem",
     "userCertPath": "/path/to/user-cert.pem",
-    "userKeyPath": "/path/to/user-key.pem"
+    "userKeyPath": "/path/to/user-key.pem",
+    "opcuaTimeout": 10.0,
+    "autoRetry": 3,
+    "batchSize": 0,
+    "defaultBrowseMaxDepth": 10
   }
 }
 ```
@@ -217,7 +221,7 @@ Execute an OPC UA method on an existing session.
 }
 ```
 
-Parameters: `[nodeId, direction, referenceTypeId, includeSubtypes, nodeClassMask]`
+Parameters: `[nodeId, direction, referenceTypeId, includeSubtypes, nodeClassMask]`. `direction` is a `BrowseDirection` enum value: 0=Forward, 1=Inverse, 2=Both.
 
 ##### `browseWithContinuation`
 
@@ -231,6 +235,57 @@ Same parameters as `browse`. Returns `{references: [...], continuationPoint: ?st
   "params": ["<base64_continuation_point>"]
 }
 ```
+
+##### `browseAll`
+
+Same parameters as `browse`. Returns a flat array of all references, automatically following continuation points.
+
+##### `browseRecursive`
+
+```json
+{
+  "method": "browseRecursive",
+  "params": [
+    {"ns": 0, "id": 85, "type": "numeric"},
+    0,
+    null,
+    null,
+    true,
+    0
+  ]
+}
+```
+
+Parameters: `[nodeId, direction(0/1/2), maxDepth(?int), referenceTypeId, includeSubtypes, nodeClassMask]`
+
+##### `translateBrowsePaths`
+
+```json
+{
+  "method": "translateBrowsePaths",
+  "params": [
+    [
+      {
+        "startingNodeId": {"ns": 0, "id": 85, "type": "numeric"},
+        "relativePath": [
+          {"targetName": {"ns": 0, "name": "Objects"}}
+        ]
+      }
+    ]
+  ]
+}
+```
+
+##### `resolveNodeId`
+
+```json
+{
+  "method": "resolveNodeId",
+  "params": ["/Objects/Server/ServerStatus", null]
+}
+```
+
+Parameters: `[path, startingNodeId]`. `startingNodeId` is optional (nullable).
 
 ##### `read`
 
@@ -417,6 +472,80 @@ Parameters: `[nodeId, startTime, endTime, processingInterval, aggregateType]`
 ```
 
 Parameters: `[nodeId, timestamps]`
+
+#### Connection and configuration getters
+
+##### `isConnected`
+
+```json
+{"method": "isConnected", "params": []}
+```
+
+Returns `bool`.
+
+##### `getConnectionState`
+
+```json
+{"method": "getConnectionState", "params": []}
+```
+
+Returns `string`: `"Connected"`, `"Disconnected"`, or `"Broken"`.
+
+##### `reconnect`
+
+```json
+{"method": "reconnect", "params": []}
+```
+
+Returns `null`.
+
+##### `getTimeout`
+
+```json
+{"method": "getTimeout", "params": []}
+```
+
+Returns `float`.
+
+##### `getAutoRetry`
+
+```json
+{"method": "getAutoRetry", "params": []}
+```
+
+Returns `int`.
+
+##### `getBatchSize`
+
+```json
+{"method": "getBatchSize", "params": []}
+```
+
+Returns `?int` (null if batching is disabled).
+
+##### `getDefaultBrowseMaxDepth`
+
+```json
+{"method": "getDefaultBrowseMaxDepth", "params": []}
+```
+
+Returns `int`.
+
+##### `getServerMaxNodesPerRead`
+
+```json
+{"method": "getServerMaxNodesPerRead", "params": []}
+```
+
+Returns `?int`.
+
+##### `getServerMaxNodesPerWrite`
+
+```json
+{"method": "getServerMaxNodesPerWrite", "params": []}
+```
+
+Returns `?int`.
 
 ## Example: direct interaction with the daemon
 

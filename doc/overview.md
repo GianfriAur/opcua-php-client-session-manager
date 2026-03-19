@@ -51,7 +51,7 @@ Drop-in replacement for `Gianfriaur\OpcuaPhpClient\Client`. Implements the same 
 
 ### TypeSerializer (`Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer`)
 
-Converts OPC UA types (NodeId, DataValue, Variant, etc.) to JSON and back for IPC transport.
+Converts OPC UA types (NodeId, DataValue, Variant, BrowseNode, BrowseDirection, ConnectionState, etc.) to JSON and back for IPC transport.
 
 ## Requirements
 

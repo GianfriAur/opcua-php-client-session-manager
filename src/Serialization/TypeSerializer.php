@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Serialization;
 
+use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
+use Gianfriaur\OpcuaPhpClient\Types\BrowseNode;
 use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
+use Gianfriaur\OpcuaPhpClient\Types\ConnectionState;
 use Gianfriaur\OpcuaPhpClient\Types\DataValue;
 use Gianfriaur\OpcuaPhpClient\Types\EndpointDescription;
 use Gianfriaur\OpcuaPhpClient\Types\LocalizedText;
@@ -48,6 +51,10 @@ class TypeSerializer
             return $this->serializeReferenceDescription($value);
         }
 
+        if ($value instanceof BrowseNode) {
+            return $this->serializeBrowseNode($value);
+        }
+
         if ($value instanceof QualifiedName) {
             return $this->serializeQualifiedName($value);
         }
@@ -62,6 +69,14 @@ class TypeSerializer
 
         if ($value instanceof NodeClass) {
             return $value->value;
+        }
+
+        if ($value instanceof BrowseDirection) {
+            return $value->value;
+        }
+
+        if ($value instanceof ConnectionState) {
+            return $value->name;
         }
 
         if ($value instanceof EndpointDescription) {
@@ -117,6 +132,17 @@ class TypeSerializer
             'typeDefinition' => $ref->getTypeDefinition() !== null
                 ? $this->serializeNodeId($ref->getTypeDefinition())
                 : null,
+        ];
+    }
+
+    public function serializeBrowseNode(BrowseNode $node): array
+    {
+        return [
+            'reference' => $this->serializeReferenceDescription($node->getReference()),
+            'children' => array_map(
+                fn(BrowseNode $child) => $this->serializeBrowseNode($child),
+                $node->getChildren(),
+            ),
         ];
     }
 
@@ -215,6 +241,33 @@ class TypeSerializer
             NodeClass::from((int) $data['nodeClass']),
             isset($data['typeDefinition']) ? $this->deserializeNodeId($data['typeDefinition']) : null,
         );
+    }
+
+    public function deserializeBrowseNode(array $data): BrowseNode
+    {
+        $node = new BrowseNode(
+            $this->deserializeReferenceDescription($data['reference']),
+        );
+
+        foreach ($data['children'] ?? [] as $childData) {
+            $node->addChild($this->deserializeBrowseNode($childData));
+        }
+
+        return $node;
+    }
+
+    public function deserializeBrowseDirection(int $value): BrowseDirection
+    {
+        return BrowseDirection::from($value);
+    }
+
+    public function deserializeConnectionState(string $name): ConnectionState
+    {
+        return match ($name) {
+            'Connected' => ConnectionState::Connected,
+            'Broken' => ConnectionState::Broken,
+            default => ConnectionState::Disconnected,
+        };
     }
 
     public function deserializeBuiltinType(int $value): BuiltinType

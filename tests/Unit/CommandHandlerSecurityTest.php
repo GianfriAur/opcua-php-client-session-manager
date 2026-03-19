@@ -35,6 +35,24 @@ describe('CommandHandler Security', function () {
             expect($result['error']['message'])->toContain('__destruct');
         });
 
+        it('rejects setter methods (setTimeout, setAutoRetry, etc.) via query', function () {
+            $client = $this->createStub(Client::class);
+            $session = new Session('sess1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            foreach (['setTimeout', 'setAutoRetry', 'setBatchSize', 'setDefaultBrowseMaxDepth'] as $method) {
+                $result = $this->handler->handle([
+                    'command' => 'query',
+                    'sessionId' => 'sess1',
+                    'method' => $method,
+                    'params' => [1],
+                ]);
+
+                expect($result['success'])->toBeFalse();
+                expect($result['error']['type'])->toBe('forbidden_method');
+            }
+        });
+
         it('rejects calls to setSecurityPolicy via query', function () {
             $client = $this->createStub(Client::class);
             $session = new Session('sess1', $client, 'opc.tcp://localhost:4840', [], microtime(true));

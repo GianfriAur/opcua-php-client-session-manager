@@ -58,8 +58,10 @@ No external resources required (no daemon, no OPC UA server).
 | File | What it tests |
 |------|---------------|
 | `TypeSerializerTest.php` | Serialization/deserialization of all OPC UA types, roundtrips, edge cases |
+| `BrowseDirectionSerializationTest.php` | Serialization of BrowseDirection, ConnectionState, BrowseNode (tree roundtrips) |
+| `ManagedClientConfigTest.php` | ManagedClient configuration: timeout, auto-retry, batching, browse depth, connection state (local) |
 | `SessionStoreTest.php` | Session registry: create, get, remove, touch, expiry, count |
-| `CommandHandlerSecurityTest.php` | Method whitelist, connect/disconnect rejection, credential stripping, max sessions, certificate path validation, error message sanitization, unknown commands |
+| `CommandHandlerSecurityTest.php` | Method whitelist (including setter rejection), connect/disconnect rejection, credential stripping, max sessions, certificate path validation, error message sanitization, unknown commands |
 
 ### Integration tests (`tests/Integration/`)
 
@@ -76,6 +78,10 @@ Require the Docker OPC UA servers to be running. The daemon is started and stopp
 | `SubscriptionTest.php` | Create subscription/monitored items, publish, delete, multiple subscriptions |
 | `SessionPersistenceTest.php` | Session persistence across ManagedClient instances, isolation, independent disconnect |
 | `SecurityTest.php` | Method whitelist via IPC (including connect/disconnect rejection), credential stripping, buffer overflow, socket permissions, auth token (with dedicated auth daemon), max sessions enforcement |
+| `BrowseRecursiveTest.php` | browseAll, browseAll with BrowseDirection::Both, browseRecursive tree traversal, depth control, setDefaultBrowseMaxDepth |
+| `TranslateBrowsePathTest.php` | resolveNodeId paths, translateBrowsePaths, custom starting node |
+| `ConnectionStateTest.php` | isConnected, getConnectionState, reconnect, state transitions |
+| `TimeoutAndBatchingTest.php` | Custom timeout, batching, server limits discovery, auto-retry |
 
 ## TestHelper
 

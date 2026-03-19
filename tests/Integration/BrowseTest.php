@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
 use Gianfriaur\OpcuaPhpClient\Types\NodeClass;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 use Gianfriaur\OpcuaSessionManager\Tests\Integration\Helpers\TestHelper;
@@ -101,7 +102,7 @@ describe('Browse via ManagedClient', function () {
             $client = TestHelper::connectNoSecurity();
             $testServerNodeId = TestHelper::browseToNode($client, ['TestServer']);
 
-            $refs = $client->browse($testServerNodeId, direction: 1);
+            $refs = $client->browse($testServerNodeId, direction: BrowseDirection::Inverse);
 
             expect($refs)->toBeArray()->not->toBeEmpty();
             foreach ($refs as $ref) {
@@ -119,7 +120,7 @@ describe('Browse via ManagedClient', function () {
 
             $refs = $client->browse(
                 NodeId::numeric(0, 85),
-                direction: 0,
+                direction: BrowseDirection::Forward,
                 referenceTypeId: NodeId::numeric(0, 35),
                 includeSubtypes: true,
             );
