@@ -12,9 +12,10 @@ class Session
         public readonly string $id,
         public readonly Client $client,
         public readonly string $endpointUrl,
-        public readonly array $config,
-        public float $lastUsed,
-    ) {
+        public readonly array  $config,
+        public float           $lastUsed,
+    )
+    {
     }
 
     public function touch(): void

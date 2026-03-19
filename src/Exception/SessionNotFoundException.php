@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Exception;
 
-class SessionNotFoundException extends \RuntimeException
+use RuntimeException;
+
+class SessionNotFoundException extends RuntimeException
 {
 }

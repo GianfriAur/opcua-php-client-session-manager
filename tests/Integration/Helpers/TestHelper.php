@@ -8,18 +8,20 @@ use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 use Gianfriaur\OpcuaPhpClient\Types\ReferenceDescription;
 use Gianfriaur\OpcuaSessionManager\Client\ManagedClient;
 use Gianfriaur\OpcuaSessionManager\Client\SocketConnection;
+use RuntimeException;
+use Throwable;
 
 final class TestHelper
 {
     // ── Endpoint URLs (same as opcua-php-client) ────────────────────────
-    public const ENDPOINT_NO_SECURITY   = 'opc.tcp://localhost:4840/UA/TestServer';
-    public const ENDPOINT_USERPASS      = 'opc.tcp://localhost:4841/UA/TestServer';
-    public const ENDPOINT_CERTIFICATE   = 'opc.tcp://localhost:4842/UA/TestServer';
-    public const ENDPOINT_ALL_SECURITY  = 'opc.tcp://localhost:4843/UA/TestServer';
-    public const ENDPOINT_DISCOVERY     = 'opc.tcp://localhost:4844';
-    public const ENDPOINT_AUTO_ACCEPT   = 'opc.tcp://localhost:4845/UA/TestServer';
-    public const ENDPOINT_SIGN_ONLY     = 'opc.tcp://localhost:4846/UA/TestServer';
-    public const ENDPOINT_LEGACY        = 'opc.tcp://localhost:4847/UA/TestServer';
+    public const ENDPOINT_NO_SECURITY = 'opc.tcp://localhost:4840/UA/TestServer';
+    public const ENDPOINT_USERPASS = 'opc.tcp://localhost:4841/UA/TestServer';
+    public const ENDPOINT_CERTIFICATE = 'opc.tcp://localhost:4842/UA/TestServer';
+    public const ENDPOINT_ALL_SECURITY = 'opc.tcp://localhost:4843/UA/TestServer';
+    public const ENDPOINT_DISCOVERY = 'opc.tcp://localhost:4844';
+    public const ENDPOINT_AUTO_ACCEPT = 'opc.tcp://localhost:4845/UA/TestServer';
+    public const ENDPOINT_SIGN_ONLY = 'opc.tcp://localhost:4846/UA/TestServer';
+    public const ENDPOINT_LEGACY = 'opc.tcp://localhost:4847/UA/TestServer';
 
     // ── Socket path for test daemon ─────────────────────────────────────
     public const SOCKET_PATH = '/tmp/opcua-session-manager-test.sock';
@@ -48,17 +50,17 @@ final class TestHelper
     }
 
     // ── Users ───────────────────────────────────────────────────────────
-    public const USER_ADMIN    = ['username' => 'admin',    'password' => 'admin123'];
+    public const USER_ADMIN = ['username' => 'admin', 'password' => 'admin123'];
     public const USER_OPERATOR = ['username' => 'operator', 'password' => 'operator123'];
-    public const USER_VIEWER   = ['username' => 'viewer',   'password' => 'viewer123'];
-    public const USER_TEST     = ['username' => 'test',     'password' => 'test'];
+    public const USER_VIEWER = ['username' => 'viewer', 'password' => 'viewer123'];
+    public const USER_TEST = ['username' => 'test', 'password' => 'test'];
 
     // ── Well-known NodeIds ──────────────────────────────────────────────
-    public const NODE_ROOT            = [0, 84];
-    public const NODE_OBJECTS          = [0, 85];
-    public const NODE_SERVER           = [0, 2253];
-    public const NODE_SERVER_STATUS    = [0, 2256];
-    public const NODE_SERVER_STATE     = [0, 2259];
+    public const NODE_ROOT = [0, 84];
+    public const NODE_OBJECTS = [0, 85];
+    public const NODE_SERVER = [0, 2253];
+    public const NODE_SERVER_STATUS = [0, 2256];
+    public const NODE_SERVER_STATE = [0, 2259];
 
     // ── Daemon process management ───────────────────────────────────────
     private static $daemonProcess = null;
@@ -95,7 +97,7 @@ final class TestHelper
         self::$daemonProcess = proc_open($cmd, $descriptors, $pipes);
 
         if (!is_resource(self::$daemonProcess)) {
-            throw new \RuntimeException('Failed to start daemon');
+            throw new RuntimeException('Failed to start daemon');
         }
 
         // Wait for socket to appear
@@ -107,14 +109,14 @@ final class TestHelper
 
         if (!file_exists(self::SOCKET_PATH)) {
             self::stopDaemon();
-            throw new \RuntimeException('Daemon socket did not appear within 5 seconds');
+            throw new RuntimeException('Daemon socket did not appear within 5 seconds');
         }
 
         // Verify daemon is responding
         $response = SocketConnection::send(self::SOCKET_PATH, ['command' => 'ping']);
         if (!($response['success'] ?? false)) {
             self::stopDaemon();
-            throw new \RuntimeException('Daemon is not responding to ping');
+            throw new RuntimeException('Daemon is not responding to ping');
         }
     }
 
@@ -193,7 +195,7 @@ final class TestHelper
 
             foreach ($refs as $ref) {
                 $browseName = $ref->getBrowseName()->getName();
-                $displayName = (string) $ref->getDisplayName();
+                $displayName = (string)$ref->getDisplayName();
 
                 if ($browseName === $name || $displayName === $name) {
                     $currentNodeId = $ref->getNodeId();
@@ -207,7 +209,7 @@ final class TestHelper
                     fn(ReferenceDescription $r) => $r->getBrowseName()->getName(),
                     $refs,
                 );
-                throw new \RuntimeException(
+                throw new RuntimeException(
                     "Could not find child node '{$name}' under node. "
                     . "Available: " . implode(', ', $availableNames)
                 );
@@ -220,7 +222,7 @@ final class TestHelper
     public static function findRefByName(array $refs, string $name): ?ReferenceDescription
     {
         foreach ($refs as $ref) {
-            if ($ref->getBrowseName()->getName() === $name || (string) $ref->getDisplayName() === $name) {
+            if ($ref->getBrowseName()->getName() === $name || (string)$ref->getDisplayName() === $name) {
                 return $ref;
             }
         }
@@ -235,7 +237,7 @@ final class TestHelper
         }
         try {
             $client->disconnect();
-        } catch (\Throwable) {
+        } catch (Throwable) {
         }
     }
 }

@@ -25,7 +25,7 @@ class SocketConnection
             throw new DaemonException("Cannot connect to daemon: [{$errorCode}] {$errorMessage}");
         }
 
-        stream_set_timeout($socket, (int) $timeout, (int) (($timeout - (int) $timeout) * 1_000_000));
+        stream_set_timeout($socket, (int)$timeout, (int)(($timeout - (int)$timeout) * 1_000_000));
 
         $json = json_encode($payload, JSON_THROW_ON_ERROR);
         $written = fwrite($socket, $json . "\n");

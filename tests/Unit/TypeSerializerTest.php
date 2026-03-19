@@ -135,8 +135,8 @@ describe('TypeSerializer', function () {
 
         it('serializes a DataValue with timestamps', function () {
             $variant = new Variant(BuiltinType::String, 'test');
-            $sourceTs = new \DateTimeImmutable('2024-01-15T10:30:00+00:00');
-            $serverTs = new \DateTimeImmutable('2024-01-15T10:30:01+00:00');
+            $sourceTs = new DateTimeImmutable('2024-01-15T10:30:00+00:00');
+            $serverTs = new DateTimeImmutable('2024-01-15T10:30:01+00:00');
             $dv = new DataValue($variant, 0, $sourceTs, $serverTs);
             $result = $this->serializer->serializeDataValue($dv);
 
@@ -326,7 +326,7 @@ describe('TypeSerializer', function () {
     describe('DateTime', function () {
 
         it('serializes DateTimeImmutable to ISO 8601', function () {
-            $dt = new \DateTimeImmutable('2024-06-15T12:00:00+00:00');
+            $dt = new DateTimeImmutable('2024-06-15T12:00:00+00:00');
             $result = $this->serializer->serialize($dt);
 
             expect($result)->toBeString();

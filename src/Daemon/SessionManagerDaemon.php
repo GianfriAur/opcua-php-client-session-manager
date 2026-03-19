@@ -8,6 +8,8 @@ use React\EventLoop\Loop;
 use React\EventLoop\LoopInterface;
 use React\Socket\ConnectionInterface;
 use React\Socket\UnixServer;
+use RuntimeException;
+use Throwable;
 
 class SessionManagerDaemon
 {
@@ -23,14 +25,15 @@ class SessionManagerDaemon
     private int $activeConnections = 0;
 
     public function __construct(
-        private readonly string $socketPath,
-        private readonly int $timeout = 600,
-        private readonly int $cleanupInterval = 30,
+        private readonly string  $socketPath,
+        private readonly int     $timeout = 600,
+        private readonly int     $cleanupInterval = 30,
         private readonly ?string $authToken = null,
-        private readonly int $maxSessions = 100,
-        private readonly int $socketMode = 0600,
-        private readonly ?array $allowedCertDirs = null,
-    ) {
+        private readonly int     $maxSessions = 100,
+        private readonly int     $socketMode = 0600,
+        private readonly ?array  $allowedCertDirs = null,
+    )
+    {
         $this->store = new SessionStore();
         $this->handler = new CommandHandler($this->store, $this->maxSessions, $this->allowedCertDirs);
         $this->loop = Loop::get();
@@ -150,7 +153,7 @@ class SessionManagerDaemon
         foreach ($expired as $session) {
             try {
                 $session->client->disconnect();
-            } catch (\Throwable) {
+            } catch (Throwable) {
             }
             $this->store->remove($session->id);
             echo "Session {$session->id} expired (endpoint: {$session->endpointUrl})\n";
@@ -165,7 +168,7 @@ class SessionManagerDaemon
             try {
                 $session->client->disconnect();
                 echo "Disconnected session {$session->id}\n";
-            } catch (\Throwable) {
+            } catch (Throwable) {
             }
             $this->store->remove($session->id);
         }
@@ -196,9 +199,9 @@ class SessionManagerDaemon
     private function acquirePidLock(): void
     {
         if (file_exists($this->pidFilePath)) {
-            $existingPid = (int) file_get_contents($this->pidFilePath);
+            $existingPid = (int)file_get_contents($this->pidFilePath);
             if ($existingPid > 0 && $this->isProcessRunning($existingPid)) {
-                throw new \RuntimeException(
+                throw new RuntimeException(
                     "Another daemon instance is already running (PID: {$existingPid}). "
                     . "If this is stale, remove {$this->pidFilePath}"
                 );
@@ -206,7 +209,7 @@ class SessionManagerDaemon
             unlink($this->pidFilePath);
         }
 
-        file_put_contents($this->pidFilePath, (string) getmypid());
+        file_put_contents($this->pidFilePath, (string)getmypid());
     }
 
     private function releasePidLock(): void

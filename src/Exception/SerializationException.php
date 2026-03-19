@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Exception;
 
-class SerializationException extends \RuntimeException
+use RuntimeException;
+
+class SerializationException extends RuntimeException
 {
 }

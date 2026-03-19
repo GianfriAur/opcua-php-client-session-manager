@@ -49,7 +49,7 @@ function ensureAuthDaemon(): void
     $_authProcess = proc_open($cmd, $descriptors, $pipes);
 
     if (!is_resource($_authProcess)) {
-        throw new \RuntimeException('Failed to start auth daemon');
+        throw new RuntimeException('Failed to start auth daemon');
     }
 
     $maxWait = 50;
@@ -60,7 +60,7 @@ function ensureAuthDaemon(): void
 
     if (!file_exists($socketPath)) {
         stopAuthDaemon();
-        throw new \RuntimeException('Auth daemon socket did not appear');
+        throw new RuntimeException('Auth daemon socket did not appear');
     }
 }
 

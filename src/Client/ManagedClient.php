@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Client;
 
+use DateTimeImmutable;
 use Gianfriaur\OpcuaPhpClient\Exception\ConnectionException;
 use Gianfriaur\OpcuaPhpClient\Exception\ServiceException;
 use Gianfriaur\OpcuaPhpClient\OpcUaClientInterface;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityPolicy;
 use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
-use Gianfriaur\OpcuaPhpClient\Types\BrowseNode;
 use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
 use Gianfriaur\OpcuaPhpClient\Types\ConnectionState;
 use Gianfriaur\OpcuaPhpClient\Types\DataValue;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
-use Gianfriaur\OpcuaPhpClient\Types\QualifiedName;
 use Gianfriaur\OpcuaPhpClient\Types\Variant;
 use Gianfriaur\OpcuaSessionManager\Exception\DaemonException;
 use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
@@ -32,10 +31,11 @@ class ManagedClient implements OpcUaClientInterface
     private int $defaultBrowseMaxDepth = 10;
 
     public function __construct(
-        private readonly string $socketPath = '/tmp/opcua-session-manager.sock',
-        private readonly float $timeout = 30.0,
+        private readonly string  $socketPath = '/tmp/opcua-session-manager.sock',
+        private readonly float   $timeout = 30.0,
         private readonly ?string $authToken = null,
-    ) {
+    )
+    {
         $this->serializer = new TypeSerializer();
     }
 
@@ -184,7 +184,7 @@ class ManagedClient implements OpcUaClientInterface
             return false;
         }
 
-        return (bool) $this->query('isConnected', []);
+        return (bool)$this->query('isConnected', []);
     }
 
     public function getConnectionState(): ConnectionState
@@ -211,7 +211,8 @@ class ManagedClient implements OpcUaClientInterface
         ?NodeId         $referenceTypeId = null,
         bool            $includeSubtypes = true,
         int             $nodeClassMask = 0,
-    ): array {
+    ): array
+    {
         $result = $this->query('browse', [
             $this->serializer->serializeNodeId($nodeId),
             $direction->value,
@@ -232,7 +233,8 @@ class ManagedClient implements OpcUaClientInterface
         ?NodeId         $referenceTypeId = null,
         bool            $includeSubtypes = true,
         int             $nodeClassMask = 0,
-    ): array {
+    ): array
+    {
         $result = $this->query('browseWithContinuation', [
             $this->serializer->serializeNodeId($nodeId),
             $direction->value,
@@ -269,7 +271,8 @@ class ManagedClient implements OpcUaClientInterface
         ?NodeId         $referenceTypeId = null,
         bool            $includeSubtypes = true,
         int             $nodeClassMask = 0,
-    ): array {
+    ): array
+    {
         $result = $this->query('browseAll', [
             $this->serializer->serializeNodeId($nodeId),
             $direction->value,
@@ -291,7 +294,8 @@ class ManagedClient implements OpcUaClientInterface
         ?NodeId         $referenceTypeId = null,
         bool            $includeSubtypes = true,
         int             $nodeClassMask = 0,
-    ): array {
+    ): array
+    {
         $result = $this->query('browseRecursive', [
             $this->serializer->serializeNodeId($nodeId),
             $direction->value,
@@ -404,12 +408,13 @@ class ManagedClient implements OpcUaClientInterface
 
     public function createSubscription(
         float $publishingInterval = 500.0,
-        int $lifetimeCount = 2400,
-        int $maxKeepAliveCount = 10,
-        int $maxNotificationsPerPublish = 0,
-        bool $publishingEnabled = true,
-        int $priority = 0,
-    ): array {
+        int   $lifetimeCount = 2400,
+        int   $maxKeepAliveCount = 10,
+        int   $maxNotificationsPerPublish = 0,
+        bool  $publishingEnabled = true,
+        int   $priority = 0,
+    ): array
+    {
         return $this->query('createSubscription', [
             $publishingInterval,
             $lifetimeCount,
@@ -435,11 +440,12 @@ class ManagedClient implements OpcUaClientInterface
     }
 
     public function createEventMonitoredItem(
-        int $subscriptionId,
+        int    $subscriptionId,
         NodeId $nodeId,
-        array $selectFields = ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
-        int $clientHandle = 1,
-    ): array {
+        array  $selectFields = ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
+        int    $clientHandle = 1,
+    ): array
+    {
         return $this->query('createEventMonitoredItem', [
             $subscriptionId,
             $this->serializer->serializeNodeId($nodeId),
@@ -464,12 +470,13 @@ class ManagedClient implements OpcUaClientInterface
     }
 
     public function historyReadRaw(
-        NodeId $nodeId,
-        ?\DateTimeImmutable $startTime = null,
-        ?\DateTimeImmutable $endTime = null,
-        int $numValuesPerNode = 0,
-        bool $returnBounds = false,
-    ): array {
+        NodeId             $nodeId,
+        ?DateTimeImmutable $startTime = null,
+        ?DateTimeImmutable $endTime = null,
+        int                $numValuesPerNode = 0,
+        bool               $returnBounds = false,
+    ): array
+    {
         $result = $this->query('historyReadRaw', [
             $this->serializer->serializeNodeId($nodeId),
             $startTime?->format('c'),
@@ -485,12 +492,13 @@ class ManagedClient implements OpcUaClientInterface
     }
 
     public function historyReadProcessed(
-        NodeId $nodeId,
-        \DateTimeImmutable $startTime,
-        \DateTimeImmutable $endTime,
-        float $processingInterval,
-        NodeId $aggregateType,
-    ): array {
+        NodeId             $nodeId,
+        DateTimeImmutable $startTime,
+        DateTimeImmutable $endTime,
+        float              $processingInterval,
+        NodeId             $aggregateType,
+    ): array
+    {
         $result = $this->query('historyReadProcessed', [
             $this->serializer->serializeNodeId($nodeId),
             $startTime->format('c'),
@@ -507,11 +515,12 @@ class ManagedClient implements OpcUaClientInterface
 
     public function historyReadAtTime(
         NodeId $nodeId,
-        array $timestamps,
-    ): array {
+        array  $timestamps,
+    ): array
+    {
         $result = $this->query('historyReadAtTime', [
             $this->serializer->serializeNodeId($nodeId),
-            array_map(fn(\DateTimeImmutable $ts) => $ts->format('c'), $timestamps),
+            array_map(fn(DateTimeImmutable $ts) => $ts->format('c'), $timestamps),
         ]);
 
         return array_map(

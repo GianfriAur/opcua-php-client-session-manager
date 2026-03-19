@@ -390,7 +390,7 @@ describe('CommandHandler Security', function () {
 
             // Stub browse to throw an exception with a very long message
             $client->method('browse')->willThrowException(
-                new \RuntimeException(str_repeat('X', 1000))
+                new RuntimeException(str_repeat('X', 1000))
             );
 
             $result = $this->handler->handle([
@@ -410,7 +410,7 @@ describe('CommandHandler Security', function () {
             $this->store->create($session);
 
             $client->method('browse')->willThrowException(
-                new \RuntimeException('Error in /home/user/secret/file.php: something broke')
+                new RuntimeException('Error in /home/user/secret/file.php: something broke')
             );
 
             $result = $this->handler->handle([

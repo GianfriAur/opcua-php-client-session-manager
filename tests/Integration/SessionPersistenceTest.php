@@ -6,6 +6,7 @@ use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
 use Gianfriaur\OpcuaPhpClient\Types\NodeId;
 use Gianfriaur\OpcuaPhpClient\Types\StatusCode;
 use Gianfriaur\OpcuaSessionManager\Client\SocketConnection;
+use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
 use Gianfriaur\OpcuaSessionManager\Tests\Integration\Helpers\TestHelper;
 
 beforeAll(fn() => TestHelper::startDaemon());
@@ -72,7 +73,7 @@ describe('Session Persistence', function () {
         unset($client1);
 
         // Read back via the same daemon session using raw IPC
-        $serializedNodeId = (new \Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer())->serializeNodeId($nodeId);
+        $serializedNodeId = (new TypeSerializer())->serializeNodeId($nodeId);
         $response = SocketConnection::send(TestHelper::SOCKET_PATH, [
             'command' => 'query',
             'sessionId' => $sessionId,

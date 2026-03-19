@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Serialization;
 
+use DateTimeImmutable;
 use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
 use Gianfriaur\OpcuaPhpClient\Types\BrowseNode;
 use Gianfriaur\OpcuaPhpClient\Types\BuiltinType;
@@ -31,7 +32,7 @@ class TypeSerializer
             return $value;
         }
 
-        if ($value instanceof \DateTimeImmutable) {
+        if ($value instanceof DateTimeImmutable) {
             return $value->format('c');
         }
 
@@ -185,7 +186,7 @@ class TypeSerializer
         $type = $data['type'] ?? NodeId::TYPE_NUMERIC;
 
         return new NodeId(
-            (int) ($data['ns'] ?? 0),
+            (int)($data['ns'] ?? 0),
             $data['id'] ?? 0,
             $type,
         );
@@ -195,21 +196,21 @@ class TypeSerializer
     {
         $variant = null;
         if (isset($data['type']) && array_key_exists('value', $data)) {
-            $builtinType = BuiltinType::from((int) $data['type']);
+            $builtinType = BuiltinType::from((int)$data['type']);
             $variant = new Variant($builtinType, $this->deserializeVariantValue($builtinType, $data['value']));
         }
 
         return new DataValue(
             $variant,
-            (int) ($data['statusCode'] ?? 0),
-            isset($data['sourceTimestamp']) ? new \DateTimeImmutable($data['sourceTimestamp']) : null,
-            isset($data['serverTimestamp']) ? new \DateTimeImmutable($data['serverTimestamp']) : null,
+            (int)($data['statusCode'] ?? 0),
+            isset($data['sourceTimestamp']) ? new DateTimeImmutable($data['sourceTimestamp']) : null,
+            isset($data['serverTimestamp']) ? new DateTimeImmutable($data['serverTimestamp']) : null,
         );
     }
 
     public function deserializeVariant(array $data): Variant
     {
-        $builtinType = BuiltinType::from((int) $data['type']);
+        $builtinType = BuiltinType::from((int)$data['type']);
 
         return new Variant($builtinType, $this->deserializeVariantValue($builtinType, $data['value']));
     }
@@ -217,8 +218,8 @@ class TypeSerializer
     public function deserializeQualifiedName(array $data): QualifiedName
     {
         return new QualifiedName(
-            (int) ($data['ns'] ?? 0),
-            (string) ($data['name'] ?? ''),
+            (int)($data['ns'] ?? 0),
+            (string)($data['name'] ?? ''),
         );
     }
 
@@ -234,11 +235,11 @@ class TypeSerializer
     {
         return new ReferenceDescription(
             $this->deserializeNodeId($data['referenceTypeId']),
-            (bool) $data['isForward'],
+            (bool)$data['isForward'],
             $this->deserializeNodeId($data['nodeId']),
             $this->deserializeQualifiedName($data['browseName']),
             $this->deserializeLocalizedText($data['displayName']),
-            NodeClass::from((int) $data['nodeClass']),
+            NodeClass::from((int)$data['nodeClass']),
             isset($data['typeDefinition']) ? $this->deserializeNodeId($data['typeDefinition']) : null,
         );
     }
@@ -282,7 +283,7 @@ class TypeSerializer
         }
 
         return match ($type) {
-            BuiltinType::DateTime => new \DateTimeImmutable($value),
+            BuiltinType::DateTime => new DateTimeImmutable($value),
             BuiltinType::NodeId => is_array($value) ? $this->deserializeNodeId($value) : $value,
             BuiltinType::QualifiedName => is_array($value) ? $this->deserializeQualifiedName($value) : $value,
             BuiltinType::LocalizedText => is_array($value) ? $this->deserializeLocalizedText($value) : $value,

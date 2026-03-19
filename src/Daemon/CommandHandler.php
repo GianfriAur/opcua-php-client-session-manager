@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Gianfriaur\OpcuaSessionManager\Daemon;
 
+use DateTimeImmutable;
 use Gianfriaur\OpcuaPhpClient\Client;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityMode;
 use Gianfriaur\OpcuaPhpClient\Security\SecurityPolicy;
 use Gianfriaur\OpcuaPhpClient\Types\BrowseDirection;
 use Gianfriaur\OpcuaSessionManager\Exception\SessionNotFoundException;
 use Gianfriaur\OpcuaSessionManager\Serialization\TypeSerializer;
+use InvalidArgumentException;
+use Throwable;
 
 class CommandHandler
 {
@@ -60,9 +63,10 @@ class CommandHandler
 
     public function __construct(
         private readonly SessionStore $store,
-        private readonly int $maxSessions = 100,
-        private readonly ?array $allowedCertDirs = null,
-    ) {
+        private readonly int          $maxSessions = 100,
+        private readonly ?array       $allowedCertDirs = null,
+    )
+    {
         $this->serializer = new TypeSerializer();
     }
 
@@ -81,7 +85,7 @@ class CommandHandler
             };
         } catch (SessionNotFoundException $e) {
             return $this->error('session_not_found', $e->getMessage());
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             return $this->error(
                 basename(str_replace('\\', '/', get_class($e))),
                 $this->sanitizeErrorMessage($e->getMessage()),
@@ -103,26 +107,26 @@ class CommandHandler
         $client = new Client();
 
         if (isset($config['opcuaTimeout'])) {
-            $client->setTimeout((float) $config['opcuaTimeout']);
+            $client->setTimeout((float)$config['opcuaTimeout']);
         }
 
         if (isset($config['autoRetry'])) {
-            $client->setAutoRetry((int) $config['autoRetry']);
+            $client->setAutoRetry((int)$config['autoRetry']);
         }
 
         if (isset($config['batchSize'])) {
-            $client->setBatchSize((int) $config['batchSize']);
+            $client->setBatchSize((int)$config['batchSize']);
         }
 
         if (isset($config['defaultBrowseMaxDepth'])) {
-            $client->setDefaultBrowseMaxDepth((int) $config['defaultBrowseMaxDepth']);
+            $client->setDefaultBrowseMaxDepth((int)$config['defaultBrowseMaxDepth']);
         }
 
         if (isset($config['securityPolicy'])) {
             $client->setSecurityPolicy(SecurityPolicy::from($config['securityPolicy']));
         }
         if (isset($config['securityMode'])) {
-            $client->setSecurityMode(SecurityMode::from((int) $config['securityMode']));
+            $client->setSecurityMode(SecurityMode::from((int)$config['securityMode']));
         }
         if (isset($config['username'], $config['password'])) {
             $client->setUserCredentials($config['username'], $config['password']);
@@ -161,7 +165,7 @@ class CommandHandler
 
         try {
             $session->client->disconnect();
-        } catch (\Throwable) {
+        } catch (Throwable) {
         }
 
         $this->store->remove($sessionId);
@@ -256,7 +260,7 @@ class CommandHandler
     private function validateSingleCertPath(string $path, string $label): void
     {
         if (!is_file($path)) {
-            throw new \InvalidArgumentException("{$label} does not exist or is not a file: {$path}");
+            throw new InvalidArgumentException("{$label} does not exist or is not a file: {$path}");
         }
 
         if ($this->allowedCertDirs === null) {
@@ -265,7 +269,7 @@ class CommandHandler
 
         $realPath = realpath($path);
         if ($realPath === false) {
-            throw new \InvalidArgumentException("{$label} path cannot be resolved: {$path}");
+            throw new InvalidArgumentException("{$label} path cannot be resolved: {$path}");
         }
 
         foreach ($this->allowedCertDirs as $allowedDir) {
@@ -275,32 +279,32 @@ class CommandHandler
             }
         }
 
-        throw new \InvalidArgumentException("{$label} is not in an allowed directory: {$path}");
+        throw new InvalidArgumentException("{$label} is not in an allowed directory: {$path}");
     }
 
     private function deserializeParams(string $method, array $params): array
     {
         return match ($method) {
             'getEndpoints' => [
-                (string) $params[0],
+                (string)$params[0],
             ],
             'browse', 'browseWithContinuation', 'browseAll' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                BrowseDirection::from((int) ($params[1] ?? 0)),
+                BrowseDirection::from((int)($params[1] ?? 0)),
                 isset($params[2]) ? $this->serializer->deserializeNodeId($params[2]) : null,
-                (bool) ($params[3] ?? true),
-                (int) ($params[4] ?? 0),
+                (bool)($params[3] ?? true),
+                (int)($params[4] ?? 0),
             ],
             'browseRecursive' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                BrowseDirection::from((int) ($params[1] ?? 0)),
-                isset($params[2]) ? (int) $params[2] : null,
+                BrowseDirection::from((int)($params[1] ?? 0)),
+                isset($params[2]) ? (int)$params[2] : null,
                 isset($params[3]) ? $this->serializer->deserializeNodeId($params[3]) : null,
-                (bool) ($params[4] ?? true),
-                (int) ($params[5] ?? 0),
+                (bool)($params[4] ?? true),
+                (int)($params[5] ?? 0),
             ],
             'browseNext' => [
-                (string) $params[0],
+                (string)$params[0],
             ],
             'translateBrowsePaths' => [
                 array_map(fn(array $bp) => [
@@ -309,19 +313,19 @@ class CommandHandler
                         'referenceTypeId' => isset($elem['referenceTypeId'])
                             ? $this->serializer->deserializeNodeId($elem['referenceTypeId'])
                             : null,
-                        'isInverse' => (bool) ($elem['isInverse'] ?? false),
-                        'includeSubtypes' => (bool) ($elem['includeSubtypes'] ?? true),
+                        'isInverse' => (bool)($elem['isInverse'] ?? false),
+                        'includeSubtypes' => (bool)($elem['includeSubtypes'] ?? true),
                         'targetName' => $this->serializer->deserializeQualifiedName($elem['targetName']),
                     ], $bp['relativePath'] ?? []),
                 ], $params[0] ?? []),
             ],
             'resolveNodeId' => [
-                (string) $params[0],
+                (string)$params[0],
                 isset($params[1]) ? $this->serializer->deserializeNodeId($params[1]) : null,
             ],
             'read' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                (int) ($params[1] ?? 13),
+                (int)($params[1] ?? 13),
             ],
             'readMulti' => [
                 array_map(fn(array $item) => [
@@ -332,13 +336,13 @@ class CommandHandler
             'write' => [
                 $this->serializer->deserializeNodeId($params[0]),
                 $params[1],
-                $this->serializer->deserializeBuiltinType((int) $params[2]),
+                $this->serializer->deserializeBuiltinType((int)$params[2]),
             ],
             'writeMulti' => [
                 array_map(fn(array $item) => [
                     'nodeId' => $this->serializer->deserializeNodeId($item['nodeId']),
                     'value' => $item['value'],
-                    'type' => $this->serializer->deserializeBuiltinType((int) $item['type']),
+                    'type' => $this->serializer->deserializeBuiltinType((int)$item['type']),
                     'attributeId' => $item['attributeId'] ?? 13,
                 ], $params[0]),
             ],
@@ -348,15 +352,15 @@ class CommandHandler
                 array_map(fn(array $v) => $this->serializer->deserializeVariant($v), $params[2] ?? []),
             ],
             'createSubscription' => [
-                (float) ($params[0] ?? 500.0),
-                (int) ($params[1] ?? 2400),
-                (int) ($params[2] ?? 10),
-                (int) ($params[3] ?? 0),
-                (bool) ($params[4] ?? true),
-                (int) ($params[5] ?? 0),
+                (float)($params[0] ?? 500.0),
+                (int)($params[1] ?? 2400),
+                (int)($params[2] ?? 10),
+                (int)($params[3] ?? 0),
+                (bool)($params[4] ?? true),
+                (int)($params[5] ?? 0),
             ],
             'createMonitoredItems' => [
-                (int) $params[0],
+                (int)$params[0],
                 array_map(fn(array $item) => [
                     'nodeId' => $this->serializer->deserializeNodeId($item['nodeId']),
                     'attributeId' => $item['attributeId'] ?? 13,
@@ -367,44 +371,44 @@ class CommandHandler
                 ], $params[1]),
             ],
             'createEventMonitoredItem' => [
-                (int) $params[0],
+                (int)$params[0],
                 $this->serializer->deserializeNodeId($params[1]),
                 $params[2] ?? ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
-                (int) ($params[3] ?? 1),
+                (int)($params[3] ?? 1),
             ],
             'deleteMonitoredItems' => [
-                (int) $params[0],
+                (int)$params[0],
                 array_map('intval', $params[1]),
             ],
             'deleteSubscription' => [
-                (int) $params[0],
+                (int)$params[0],
             ],
             'publish' => [
                 $params[0] ?? [],
             ],
             'historyReadRaw' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                isset($params[1]) ? new \DateTimeImmutable($params[1]) : null,
-                isset($params[2]) ? new \DateTimeImmutable($params[2]) : null,
-                (int) ($params[3] ?? 0),
-                (bool) ($params[4] ?? false),
+                isset($params[1]) ? new DateTimeImmutable($params[1]) : null,
+                isset($params[2]) ? new DateTimeImmutable($params[2]) : null,
+                (int)($params[3] ?? 0),
+                (bool)($params[4] ?? false),
             ],
             'historyReadProcessed' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                new \DateTimeImmutable($params[1]),
-                new \DateTimeImmutable($params[2]),
-                (float) $params[3],
+                new DateTimeImmutable($params[1]),
+                new DateTimeImmutable($params[2]),
+                (float)$params[3],
                 $this->serializer->deserializeNodeId($params[4]),
             ],
             'historyReadAtTime' => [
                 $this->serializer->deserializeNodeId($params[0]),
-                array_map(fn(string $ts) => new \DateTimeImmutable($ts), $params[1]),
+                array_map(fn(string $ts) => new DateTimeImmutable($ts), $params[1]),
             ],
             'isConnected', 'getConnectionState', 'reconnect',
             'getTimeout', 'getAutoRetry', 'getBatchSize',
             'getDefaultBrowseMaxDepth', 'getServerMaxNodesPerRead',
             'getServerMaxNodesPerWrite' => [],
-            default => throw new \InvalidArgumentException("Unsupported method: {$method}"),
+            default => throw new InvalidArgumentException("Unsupported method: {$method}"),
         };
     }
 
