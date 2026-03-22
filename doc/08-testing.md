@@ -31,6 +31,21 @@ The test suite provides 8 OPC UA servers on ports 4840–4847 with different sec
 php -d pcov.enabled=1 ./vendor/bin/pest --coverage
 ```
 
+### Coverage Note
+
+`SessionManagerDaemon` is excluded from coverage reports (see `codecov.yml`). PHP coverage tools (pcov, xdebug) only instrument the process that runs the test suite — they cannot track code executing inside a child process started via `proc_open()`.
+
+The daemon IS fully tested by the integration test suite: `TestHelper::startDaemon()` starts a real daemon process, the tests send real IPC commands and verify real responses. The coverage tool simply cannot see into the subprocess.
+
+This is a known limitation shared by other daemon/worker-based PHP packages:
+
+- **Laravel Horizon** — Redis queue workers run as child processes, not covered by PHPUnit
+- **Symfony Messenger** — consumer workers are separate processes
+- **ReactPHP** servers — the event loop runs in a standalone process
+- **RoadRunner / FrankenPHP** — PHP workers are spawned by the Go runtime
+
+Without the exclusion, reported coverage would be ~82% instead of the actual ~99%+ that the full test suite provides.
+
 ## Test Structure
 
 ### Unit Tests
