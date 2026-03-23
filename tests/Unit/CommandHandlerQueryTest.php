@@ -421,4 +421,143 @@ describe('CommandHandler Query', function () {
 
     });
 
+    describe('Session recovery — transfer exceptions', function () {
+
+        it('recovers even when transferSubscriptions throws', function () {
+            $callCount = 0;
+            $client = $this->createMock(Client::class);
+            $client->method('createSubscription')->willReturn(new SubscriptionResult(10, 500.0, 2400, 10));
+            $client->method('getAutoRetry')->willReturnCallback(function () use (&$callCount) {
+                $callCount++;
+                if ($callCount === 1) {
+                    throw new ConnectionException('Connection lost');
+                }
+                return 0;
+            });
+            $client->method('reconnect');
+            $client->method('transferSubscriptions')
+                ->willThrowException(new \RuntimeException('Transfer failed'));
+
+            $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'createSubscription',
+                'params' => [500.0, 2400, 10, 0, true, 0],
+            ]);
+
+            $result = $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'getAutoRetry', 'params' => [],
+            ]);
+
+            expect($result['success'])->toBeTrue();
+        });
+
+        it('republishes available sequence numbers on successful transfer', function () {
+            $callCount = 0;
+            $client = $this->createMock(Client::class);
+            $client->method('createSubscription')->willReturn(new SubscriptionResult(10, 500.0, 2400, 10));
+            $client->method('getAutoRetry')->willReturnCallback(function () use (&$callCount) {
+                $callCount++;
+                if ($callCount === 1) {
+                    throw new ConnectionException('Connection lost');
+                }
+                return 0;
+            });
+            $client->method('reconnect');
+            $client->method('transferSubscriptions')
+                ->willReturn([new TransferResult(0, [5, 6, 7])]);
+            $client->expects($this->exactly(3))->method('republish');
+
+            $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'createSubscription',
+                'params' => [500.0, 2400, 10, 0, true, 0],
+            ]);
+
+            $result = $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'getAutoRetry', 'params' => [],
+            ]);
+
+            expect($result['success'])->toBeTrue();
+        });
+
+    });
+
+    describe('Session recovery — republish failure', function () {
+
+        it('continues when republish throws for individual sequence numbers', function () {
+            $callCount = 0;
+            $client = $this->createMock(Client::class);
+            $client->method('createSubscription')->willReturn(new SubscriptionResult(10, 500.0, 2400, 10));
+            $client->method('getAutoRetry')->willReturnCallback(function () use (&$callCount) {
+                $callCount++;
+                if ($callCount === 1) {
+                    throw new ConnectionException('Connection lost');
+                }
+                return 0;
+            });
+            $client->method('reconnect');
+            $client->method('transferSubscriptions')
+                ->willReturn([new TransferResult(0, [5])]);
+            $client->method('republish')
+                ->willThrowException(new \RuntimeException('Republish failed'));
+
+            $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'createSubscription',
+                'params' => [500.0, 2400, 10, 0, true, 0],
+            ]);
+
+            $result = $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'getAutoRetry', 'params' => [],
+            ]);
+
+            expect($result['success'])->toBeTrue();
+            expect($session->getSubscriptionIds())->toBe([10]);
+        });
+
+    });
+
+    describe('Edge cases', function () {
+
+        it('skips transfer results with no matching subscription ID', function () {
+            $callCount = 0;
+            $client = $this->createMock(Client::class);
+            $client->method('createSubscription')->willReturn(new SubscriptionResult(10, 500.0, 2400, 10));
+            $client->method('getAutoRetry')->willReturnCallback(function () use (&$callCount) {
+                $callCount++;
+                if ($callCount === 1) {
+                    throw new ConnectionException('Connection lost');
+                }
+                return 0;
+            });
+            $client->method('reconnect');
+            $client->method('transferSubscriptions')
+                ->willReturn([
+                    new TransferResult(0, []),
+                    new TransferResult(0, []),
+                ]);
+
+            $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'createSubscription',
+                'params' => [500.0, 2400, 10, 0, true, 0],
+            ]);
+
+            $result = $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'getAutoRetry', 'params' => [],
+            ]);
+
+            expect($result['success'])->toBeTrue();
+        });
+
+    });
+
 });

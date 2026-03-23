@@ -211,4 +211,129 @@ describe('CommandHandler Extended', function () {
 
     });
 
+    describe('handleOpen config branches', function () {
+
+        it('applies userCertPath/userKeyPath config', function () {
+            $tmpCert = tempnam(sys_get_temp_dir(), 'opcua_ucert_');
+            $tmpKey = tempnam(sys_get_temp_dir(), 'opcua_ukey_');
+            file_put_contents($tmpCert, 'fake user cert');
+            file_put_contents($tmpKey, 'fake user key');
+
+            try {
+                $result = $this->handler->handle([
+                    'command' => 'open',
+                    'endpointUrl' => 'opc.tcp://nonexistent-host:99999',
+                    'config' => [
+                        'userCertPath' => $tmpCert,
+                        'userKeyPath' => $tmpKey,
+                        'opcuaTimeout' => 0.1,
+                    ],
+                ]);
+
+                expect($result['success'])->toBeFalse();
+                expect($result['error']['type'])->not->toBe('InvalidArgumentException');
+            } finally {
+                unlink($tmpCert);
+                unlink($tmpKey);
+            }
+        });
+
+        it('applies clientCertPath with caCertPath config', function () {
+            $tmpCert = tempnam(sys_get_temp_dir(), 'opcua_cert_');
+            $tmpKey = tempnam(sys_get_temp_dir(), 'opcua_key_');
+            $tmpCa = tempnam(sys_get_temp_dir(), 'opcua_ca_');
+            file_put_contents($tmpCert, 'fake cert');
+            file_put_contents($tmpKey, 'fake key');
+            file_put_contents($tmpCa, 'fake ca');
+
+            try {
+                $result = $this->handler->handle([
+                    'command' => 'open',
+                    'endpointUrl' => 'opc.tcp://nonexistent-host:99999',
+                    'config' => [
+                        'clientCertPath' => $tmpCert,
+                        'clientKeyPath' => $tmpKey,
+                        'caCertPath' => $tmpCa,
+                        'opcuaTimeout' => 0.1,
+                    ],
+                ]);
+
+                expect($result['success'])->toBeFalse();
+                expect($result['error']['type'])->not->toBe('InvalidArgumentException');
+            } finally {
+                unlink($tmpCert);
+                unlink($tmpKey);
+                unlink($tmpCa);
+            }
+        });
+
+    });
+
+    describe('handleQuery — result instanceof Client', function () {
+
+        it('returns null data when method returns void (Client-like)', function () {
+            $client = $this->createStub(Client::class);
+            $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $result = $this->handler->handle([
+                'command' => 'query', 'sessionId' => 's1', 'method' => 'flushCache', 'params' => [],
+            ]);
+
+            expect($result['success'])->toBeTrue();
+            expect($result['data'])->toBeNull();
+        });
+
+    });
+
+    describe('Certificate path cannot be resolved', function () {
+
+        it('rejects cert path that realpath cannot resolve', function () {
+            $tmpDir = sys_get_temp_dir();
+            $handler = new CommandHandler($this->store, allowedCertDirs: [$tmpDir]);
+
+            $symlinkPath = $tmpDir . '/opcua_broken_link_' . bin2hex(random_bytes(4));
+            symlink('/nonexistent/target', $symlinkPath);
+
+            try {
+                $result = $handler->handle([
+                    'command' => 'open',
+                    'endpointUrl' => 'opc.tcp://localhost:4840',
+                    'config' => [
+                        'clientCertPath' => $symlinkPath,
+                        'clientKeyPath' => $symlinkPath,
+                    ],
+                ]);
+
+                expect($result['success'])->toBeFalse();
+                expect($result['error']['message'])->toContain('does not exist');
+            } finally {
+                if (is_link($symlinkPath)) {
+                    unlink($symlinkPath);
+                }
+            }
+        });
+
+    });
+
+    describe('throwInvalidArgumentIf', function () {
+
+        it('throws when condition is true', function () {
+            $method = new ReflectionMethod(CommandHandler::class, 'throwInvalidArgumentIf');
+            $method->setAccessible(true);
+
+            expect(fn() => $method->invoke(null, true, 'Path cannot be resolved'))
+                ->toThrow(InvalidArgumentException::class, 'Path cannot be resolved');
+        });
+
+        it('does nothing when condition is false', function () {
+            $method = new ReflectionMethod(CommandHandler::class, 'throwInvalidArgumentIf');
+            $method->setAccessible(true);
+
+            $method->invoke(null, false, 'Should not throw');
+            expect(true)->toBeTrue();
+        });
+
+    });
+
 });

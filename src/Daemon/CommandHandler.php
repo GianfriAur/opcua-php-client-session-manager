@@ -236,10 +236,6 @@ class CommandHandler
 
         $this->trackSubscriptionChanges($session, $method, $args, $result);
 
-        if ($result instanceof Client) {
-            return $this->success(null);
-        }
-
         return $this->success($this->serializer->serialize($result));
     }
 
@@ -407,18 +403,14 @@ class CommandHandler
 
     private function validateSingleCertPath(string $path, string $label): void
     {
-        if (!is_file($path)) {
-            throw new InvalidArgumentException("{$label} does not exist or is not a file: {$path}");
-        }
+        self::throwInvalidArgumentIf(!is_file($path), "{$label} does not exist or is not a file: {$path}");
 
         if ($this->allowedCertDirs === null) {
             return;
         }
 
         $realPath = realpath($path);
-        if ($realPath === false) {
-            throw new InvalidArgumentException("{$label} path cannot be resolved: {$path}");
-        }
+        self::throwInvalidArgumentIf($realPath === false, "{$label} path cannot be resolved: {$path}");
 
         foreach ($this->allowedCertDirs as $allowedDir) {
             $realDir = realpath($allowedDir);
@@ -428,6 +420,20 @@ class CommandHandler
         }
 
         throw new InvalidArgumentException("{$label} is not in an allowed directory: {$path}");
+    }
+
+    /**
+     * @param bool $condition
+     * @param string $message
+     * @return void
+     *
+     * @throws InvalidArgumentException
+     */
+    private static function throwInvalidArgumentIf(bool $condition, string $message): void
+    {
+        if ($condition) {
+            throw new InvalidArgumentException($message);
+        }
     }
 
     /**

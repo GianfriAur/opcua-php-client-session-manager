@@ -558,4 +558,51 @@ describe('ManagedClient IPC', function () {
 
     });
 
+    describe('Edge case branches', function () {
+
+        it('translateBrowsePaths serializes referenceTypeId when present', function () {
+            $daemon = startFakeDaemon([
+                ['success' => true, 'data' => [
+                    ['statusCode' => 0, 'targets' => [['targetId' => ['ns' => 0, 'id' => 2253, 'type' => 'numeric'], 'remainingPathIndex' => 0]]],
+                ]],
+            ]);
+
+            try {
+                $client = connectFakeClient($daemon['socketPath']);
+                $results = $client->translateBrowsePaths([
+                    ['startingNodeId' => NodeId::numeric(0, 84), 'relativePath' => [
+                        [
+                            'referenceTypeId' => NodeId::numeric(0, 35),
+                            'isInverse' => false,
+                            'includeSubtypes' => true,
+                            'targetName' => new \Gianfriaur\OpcuaPhpClient\Types\QualifiedName(0, 'Objects'),
+                        ],
+                    ]],
+                ]);
+
+                expect($results)->toHaveCount(1);
+                expect($results[0])->toBeInstanceOf(BrowsePathResult::class);
+            } finally {
+                stopFakeDaemon($daemon);
+            }
+        });
+
+        it('resolveNodeId with string startingNodeId', function () {
+            $daemon = startFakeDaemon([
+                ['success' => true, 'data' => ['ns' => 0, 'id' => 2253, 'type' => 'numeric']],
+            ]);
+
+            try {
+                $client = connectFakeClient($daemon['socketPath']);
+                $nodeId = $client->resolveNodeId('/Objects/Server', 'i=85');
+
+                expect($nodeId)->toBeInstanceOf(NodeId::class);
+                expect($nodeId->identifier)->toBe(2253);
+            } finally {
+                stopFakeDaemon($daemon);
+            }
+        });
+
+    });
+
 });

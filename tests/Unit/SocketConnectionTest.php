@@ -152,4 +152,28 @@ describe('SocketConnection', function () {
         }
     });
 
+    it('closeAndThrowIf closes socket and throws when condition is true', function () {
+        $method = new ReflectionMethod(SocketConnection::class, 'closeAndThrowIf');
+        $method->setAccessible(true);
+
+        $stream = fopen('php://memory', 'r+');
+
+        expect(function () use ($method, $stream) {
+            $method->invoke(null, $stream, true, 'Write failed');
+        })->toThrow(DaemonException::class, 'Write failed');
+
+        expect(is_resource($stream))->toBeFalse();
+    });
+
+    it('closeAndThrowIf does nothing when condition is false', function () {
+        $method = new ReflectionMethod(SocketConnection::class, 'closeAndThrowIf');
+        $method->setAccessible(true);
+
+        $stream = fopen('php://memory', 'r+');
+        $method->invoke(null, $stream, false, 'Write failed');
+
+        expect(is_resource($stream))->toBeTrue();
+        fclose($stream);
+    });
+
 });

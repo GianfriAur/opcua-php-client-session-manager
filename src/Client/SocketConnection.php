@@ -43,10 +43,7 @@ class SocketConnection
         $json = json_encode($payload, JSON_THROW_ON_ERROR);
         $written = fwrite($socket, $json . "\n");
 
-        if ($written === false) {
-            fclose($socket);
-            throw new DaemonException('Failed to write to daemon socket');
-        }
+        self::closeAndThrowIf($socket, $written === false, 'Failed to write to daemon socket');
 
         $response = '';
         while (!feof($socket)) {
@@ -87,6 +84,22 @@ class SocketConnection
     private static function throwDaemonExceptionIf(bool $condition, string $message): void
     {
         if ($condition) {
+            throw new DaemonException($message);
+        }
+    }
+
+    /**
+     * @param resource $socket
+     * @param bool $condition
+     * @param string $message
+     * @return void
+     *
+     * @throws DaemonException
+     */
+    private static function closeAndThrowIf($socket, bool $condition, string $message): void
+    {
+        if ($condition) {
+            fclose($socket);
             throw new DaemonException($message);
         }
     }
