@@ -241,4 +241,76 @@ describe('TypeSerializer — Extended', function () {
 
     });
 
+    describe('Generic serialize dispatch for core types', function () {
+
+        it('dispatches Variant through generic serialize', function () {
+            $variant = new Variant(BuiltinType::Int32, 42);
+            $result = $this->serializer->serialize($variant);
+
+            expect($result)->toBeArray();
+            expect($result['type'])->toBe(BuiltinType::Int32->value);
+            expect($result['value'])->toBe(42);
+        });
+
+        it('dispatches ReferenceDescription through generic serialize', function () {
+            $ref = new ReferenceDescription(
+                NodeId::numeric(0, 35),
+                true,
+                NodeId::numeric(0, 85),
+                new QualifiedName(0, 'Objects'),
+                new LocalizedText(null, 'Objects'),
+                NodeClass::Object,
+                null,
+            );
+            $result = $this->serializer->serialize($ref);
+
+            expect($result)->toBeArray();
+            expect($result['isForward'])->toBeTrue();
+            expect($result['browseName']['name'])->toBe('Objects');
+        });
+
+        it('dispatches BrowseNode through generic serialize', function () {
+            $node = new \Gianfriaur\OpcuaPhpClient\Types\BrowseNode(
+                new ReferenceDescription(
+                    NodeId::numeric(0, 35),
+                    true,
+                    NodeId::numeric(0, 85),
+                    new QualifiedName(0, 'Objects'),
+                    new LocalizedText(null, 'Objects'),
+                    NodeClass::Object,
+                    null,
+                ),
+            );
+            $result = $this->serializer->serialize($node);
+
+            expect($result)->toBeArray();
+            expect($result['reference']['browseName']['name'])->toBe('Objects');
+            expect($result['children'])->toBe([]);
+        });
+
+        it('dispatches QualifiedName through generic serialize', function () {
+            $qn = new QualifiedName(2, 'Temperature');
+            $result = $this->serializer->serialize($qn);
+
+            expect($result)->toBe(['ns' => 2, 'name' => 'Temperature']);
+        });
+
+        it('dispatches LocalizedText through generic serialize', function () {
+            $lt = new LocalizedText('en', 'Hello');
+            $result = $this->serializer->serialize($lt);
+
+            expect($result)->toBe(['locale' => 'en', 'text' => 'Hello']);
+        });
+
+        it('dispatches DataValue through generic serialize', function () {
+            $dv = new DataValue(new Variant(BuiltinType::Double, 3.14), 0);
+            $result = $this->serializer->serialize($dv);
+
+            expect($result)->toBeArray();
+            expect($result['value'])->toBe(3.14);
+            expect($result['statusCode'])->toBe(0);
+        });
+
+    });
+
 });

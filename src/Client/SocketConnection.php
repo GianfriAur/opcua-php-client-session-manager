@@ -21,9 +21,10 @@ class SocketConnection
      */
     public static function send(string $socketPath, array $payload, float $timeout = 30.0): array
     {
-        if (!file_exists($socketPath)) {
-            throw new DaemonException("Socket not found: {$socketPath}. Is the daemon running?");
-        }
+        self::throwDaemonExceptionIf(
+            !file_exists($socketPath),
+            "Socket not found: {$socketPath}. Is the daemon running?",
+        );
 
         $socket = @stream_socket_client(
             "unix://{$socketPath}",
@@ -32,9 +33,10 @@ class SocketConnection
             $timeout,
         );
 
-        if ($socket === false) {
-            throw new DaemonException("Cannot connect to daemon: [{$errorCode}] {$errorMessage}");
-        }
+        self::throwDaemonExceptionIf(
+            $socket === false,
+            "Cannot connect to daemon: [{$errorCode}] {$errorMessage}",
+        );
 
         stream_set_timeout($socket, (int)$timeout, (int)(($timeout - (int)$timeout) * 1_000_000));
 
@@ -62,20 +64,30 @@ class SocketConnection
         $meta = stream_get_meta_data($socket);
         fclose($socket);
 
-        if ($meta['timed_out']) {
-            throw new DaemonException('Daemon request timed out');
-        }
+        self::throwDaemonExceptionIf($meta['timed_out'], 'Daemon request timed out');
 
         $response = trim($response);
-        if ($response === '') {
-            throw new DaemonException('Empty response from daemon');
-        }
+
+        self::throwDaemonExceptionIf($response === '', 'Empty response from daemon');
 
         $decoded = json_decode($response, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($decoded)) {
-            throw new DaemonException('Invalid response from daemon');
-        }
+
+        self::throwDaemonExceptionIf(!is_array($decoded), 'Invalid response from daemon');
 
         return $decoded;
+    }
+
+    /**
+     * @param bool $condition
+     * @param string $message
+     * @return void
+     *
+     * @throws DaemonException
+     */
+    private static function throwDaemonExceptionIf(bool $condition, string $message): void
+    {
+        if ($condition) {
+            throw new DaemonException($message);
+        }
     }
 }

@@ -186,4 +186,20 @@ describe('StreamLogger', function () {
         fclose($stream);
     });
 
+    it('throws RuntimeException when log file cannot be opened', function () {
+        $dir = sys_get_temp_dir() . '/opcua_readonly_' . bin2hex(random_bytes(4));
+        mkdir($dir, 0555, true);
+        $file = $dir . '/daemon.log';
+
+        try {
+            expect(fn() => new StreamLogger($file))->toThrow(RuntimeException::class, 'Cannot open log file');
+        } finally {
+            if (file_exists($file)) {
+                unlink($file);
+            }
+            chmod($dir, 0755);
+            rmdir($dir);
+        }
+    });
+
 });

@@ -45,11 +45,7 @@ class StreamLogger extends AbstractLogger
             if (!is_dir($dir)) {
                 mkdir($dir, 0755, true);
             }
-            $stream = fopen($target, 'a');
-            if ($stream === false) {
-                throw new \RuntimeException("Cannot open log file: {$target}");
-            }
-            $this->stream = $stream;
+            $this->stream = self::openOrFail($target);
             $this->ownsStream = true;
         }
     }
@@ -90,6 +86,19 @@ class StreamLogger extends AbstractLogger
         }
 
         return strtr($message, $replacements);
+    }
+
+    /**
+     * @param string $path
+     * @return resource
+     */
+    private static function openOrFail(string $path)
+    {
+        $stream = @fopen($path, 'a');
+        if ($stream === false) {
+            throw new \RuntimeException("Cannot open log file: {$path}");
+        }
+        return $stream;
     }
 
     public function __destruct()
