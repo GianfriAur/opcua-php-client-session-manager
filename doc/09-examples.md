@@ -216,3 +216,84 @@ try {
     try { $client->disconnect(); } catch (\Throwable) {}
 }
 ```
+
+## Auto-Publish with PSR-14 Events
+
+Start the daemon with auto-publish enabled. The client's existing PSR-14 events are dispatched automatically for every subscription notification — no manual `publish()` loop needed.
+
+```php
+use PhpOpcua\Client\Event\DataChangeReceived;
+use PhpOpcua\Client\Event\EventNotificationReceived;
+use PhpOpcua\Client\Event\AlarmActivated;
+use PhpOpcua\SessionManager\Daemon\SessionManagerDaemon;
+use Psr\EventDispatcher\EventDispatcherInterface;
+
+$dispatcher = /* your PSR-14 event dispatcher */;
+
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,
+    autoPublish: true,
+);
+
+$daemon->autoConnect([
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'config' => ['username' => 'operator', 'password' => 'secret'],
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                    ['node_id' => 'ns=2;s=Pressure', 'client_handle' => 2],
+                    ['node_id' => 'ns=2;s=MachineState', 'client_handle' => 3],
+                ],
+                'event_monitored_items' => [
+                    [
+                        'node_id' => 'i=2253',
+                        'client_handle' => 10,
+                        'select_fields' => [
+                            'EventId', 'EventType', 'SourceName', 'Time',
+                            'Message', 'Severity', 'ActiveState',
+                        ],
+                    ],
+                ],
+            ],
+        ],
+    ],
+]);
+
+$daemon->run();
+```
+
+Register listeners on your PSR-14 dispatcher to handle notifications:
+
+```php
+$dispatcher->listen(DataChangeReceived::class, function (DataChangeReceived $e) {
+    echo "Subscription {$e->subscriptionId}, handle {$e->clientHandle}: {$e->dataValue->getValue()}\n";
+});
+
+$dispatcher->listen(AlarmActivated::class, function (AlarmActivated $e) {
+    echo "ALARM from {$e->sourceName}: {$e->message} (severity: {$e->severity})\n";
+});
+```
+
+## Auto-Publish with Runtime Subscriptions
+
+Auto-publish also works for subscriptions created at runtime via `ManagedClient`. Any session that creates a subscription gets auto-published automatically:
+
+```php
+use PhpOpcua\SessionManager\Client\ManagedClient;
+
+$client = new ManagedClient();
+$client->connect('opc.tcp://localhost:4840');
+
+$sub = $client->createSubscription(publishingInterval: 500.0);
+$client->createMonitoredItems($sub->subscriptionId, [
+    ['nodeId' => 'ns=2;s=Temperature', 'clientHandle' => 1],
+]);
+
+// No need to call publish() — the daemon handles it automatically.
+// DataChangeReceived events are dispatched to the PSR-14 dispatcher.
+```

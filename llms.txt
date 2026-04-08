@@ -27,6 +27,8 @@ A PHP library that solves the OPC UA session persistence problem in PHP's reques
 - PSR-16 Cache: invalidateCache() and flushCache() forwarded to daemon
 - Security hardening: method whitelist (37 methods), IPC auth token, credential stripping, error sanitization, connection limits
 - Auto-retry and auto-batching forwarded to daemon's Client
+- Auto-publish: daemon automatically calls publish() for sessions with subscriptions, dispatching PSR-14 events (DataChangeReceived, EventNotificationReceived, AlarmActivated, etc.)
+- Auto-connect: daemon connects and registers subscriptions at startup from pre-configured connection definitions
 - Automatic cleanup: expired sessions closed after inactivity timeout
 - Graceful shutdown: SIGTERM/SIGINT disconnect all sessions
 
@@ -35,8 +37,9 @@ A PHP library that solves the OPC UA session persistence problem in PHP's reques
 - ManagedClient (src/Client/ManagedClient.php): drop-in OpcUaClientInterface proxy, serializes calls to IPC
 - SocketConnection (src/Client/SocketConnection.php): Unix socket JSON transport
 - SessionManagerDaemon (src/Daemon/SessionManagerDaemon.php): ReactPHP daemon, event loop, cleanup timer, signal handlers
-- CommandHandler (src/Daemon/CommandHandler.php): IPC command dispatch, method whitelist, security enforcement
-- Session (src/Daemon/Session.php): session wrapper (Client + metadata + lastUsed)
+- CommandHandler (src/Daemon/CommandHandler.php): IPC command dispatch, method whitelist, security enforcement, auto-connect
+- AutoPublisher (src/Daemon/AutoPublisher.php): per-session auto-publish cycle with self-rescheduling timers and ack management
+- Session (src/Daemon/Session.php): session wrapper (Client + metadata + lastUsed + publishing intervals)
 - SessionStore (src/Daemon/SessionStore.php): in-memory session registry with expiration
 - TypeSerializer (src/Serialization/TypeSerializer.php): bidirectional JSON serialization for all OPC UA types and DTOs
 
@@ -92,6 +95,7 @@ $value = $client->read('i=2259'); // ~5ms instead of ~155ms
 - PhpOpcua\SessionManager\Client\SocketConnection — Unix socket JSON transport
 - PhpOpcua\SessionManager\Daemon\SessionManagerDaemon — ReactPHP daemon
 - PhpOpcua\SessionManager\Daemon\CommandHandler — IPC command dispatch and security
+- PhpOpcua\SessionManager\Daemon\AutoPublisher — per-session auto-publish cycle manager
 - PhpOpcua\SessionManager\Daemon\Session — session wrapper
 - PhpOpcua\SessionManager\Daemon\SessionStore — in-memory session registry
 - PhpOpcua\SessionManager\Serialization\TypeSerializer — JSON ↔ OPC UA type conversion

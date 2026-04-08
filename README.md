@@ -29,6 +29,8 @@ PHP's request/response model destroys all state — including network connection
 - **Drop-in replacement** — `ManagedClient` implements the same `OpcUaClientInterface` as the direct `Client`. Swap one line, keep all your code
 - **All OPC UA operations** — browse, read, write, method calls, subscriptions, history, path resolution, type discovery
 - **Security hardening** — method whitelist, IPC authentication, credential stripping, error sanitization, connection limits
+- **Auto-publish** — daemon automatically publishes for sessions with active subscriptions and dispatches PSR-14 events (`DataChangeReceived`, `AlarmActivated`, etc.) — no manual publish loop needed
+- **Auto-connect** — daemon can auto-connect and register subscriptions at startup from pre-configured connection definitions
 - **Automatic cleanup** — expired sessions are disconnected after configurable inactivity timeout
 - **Graceful shutdown** — SIGTERM/SIGINT cleanly disconnect all active sessions
 
@@ -145,6 +147,48 @@ foreach ($response->notifications as $notif) {
 }
 ```
 
+### Auto-publish (no manual publish loop)
+
+When the daemon is started with an `EventDispatcherInterface` and `autoPublish: true`, it automatically calls `publish()` for sessions that have subscriptions. The client's PSR-14 events are dispatched to your listeners:
+
+```php
+use PhpOpcua\Client\Event\DataChangeReceived;
+use PhpOpcua\Client\Event\AlarmActivated;
+use Psr\EventDispatcher\EventDispatcherInterface;
+
+// 1. Start daemon with auto-publish
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $yourPsr14Dispatcher,
+    autoPublish: true,
+);
+
+// 2. Pre-configure connections to auto-connect on startup
+$daemon->autoConnect([
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'config' => [],
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                    ['node_id' => 'ns=2;s=Pressure', 'client_handle' => 2],
+                ],
+                'event_monitored_items' => [
+                    ['node_id' => 'i=2253', 'client_handle' => 10],
+                ],
+            ],
+        ],
+    ],
+]);
+
+$daemon->run();
+// DataChangeReceived, EventNotificationReceived, AlarmActivated events
+// are dispatched to your PSR-14 listeners automatically.
+```
+
 ### Secure connection with authentication
 
 ```php
@@ -213,6 +257,8 @@ Request N:                       [read 5ms]           → total ~5ms
 | **Security** | 6 policies, 3 auth modes, IPC authentication, method whitelist |
 | **Auto-Retry** | Automatic reconnect on connection failures |
 | **Auto-Batching** | Transparent batching for `readMulti()`/`writeMulti()` |
+| **Auto-Publish** | Daemon automatically calls `publish()` for sessions with subscriptions and dispatches PSR-14 events |
+| **Auto-Connect** | Daemon connects and registers subscriptions at startup from pre-configured definitions |
 | **Automatic Cleanup** | Expired sessions closed after inactivity timeout |
 | **Graceful Shutdown** | SIGTERM/SIGINT disconnect all sessions cleanly |
 
@@ -296,7 +342,7 @@ OPCUA_AUTH_TOKEN=$(cat /etc/opcua/daemon.token) php bin/opcua-session-manager \
 ./vendor/bin/pest tests/Integration/ --group=integration   # integration only
 ```
 
-340+ tests (unit + integration). Integration tests run against [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite) — a Docker-based OPC UA environment built on the OPC Foundation's UA-.NETStandard reference implementation — covering browse, read/write, subscriptions, method calls, path resolution, connection state, security, type serialization, session persistence, session recovery, and all v4.0.0 DTOs.
+380+ tests (unit + integration). Integration tests run against [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite) — a Docker-based OPC UA environment built on the OPC Foundation's UA-.NETStandard reference implementation — covering browse, read/write, subscriptions, method calls, path resolution, connection state, security, type serialization, session persistence, session recovery, and all v4.0.0 DTOs.
 
 > **Note on coverage:** `SessionManagerDaemon` is excluded from coverage reports because it runs as a separate long-lived process (ReactPHP event loop). PHP coverage tools (pcov, xdebug) only instrument the test runner process — they cannot track code executing inside a subprocess started via `proc_open()`. The daemon is fully tested by the integration suite, which starts a real daemon, sends IPC commands, and verifies responses. This is a known limitation shared by other daemon-based PHP packages (Laravel Horizon, Symfony Messenger, RoadRunner workers).
 

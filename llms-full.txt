@@ -23,9 +23,10 @@ PHP Request (short-lived) ←→ Unix Socket IPC ←→ SessionManagerDaemon (Re
 
 Components:
 - ManagedClient: drop-in OpcUaClientInterface proxy, translates method calls to IPC
-- SessionManagerDaemon: ReactPHP event loop, Unix socket server, cleanup timer, signal handlers
-- CommandHandler: IPC dispatch, method whitelist (37 methods), credential sanitization
-- TypeSerializer: bidirectional JSON serialization for all OPC UA types and v3.0.0 DTOs
+- SessionManagerDaemon: ReactPHP event loop, Unix socket server, cleanup timer, signal handlers, auto-publish, auto-connect
+- AutoPublisher: per-session auto-publish cycle with self-rescheduling timers, ack management, recovery
+- CommandHandler: IPC dispatch, method whitelist (37 methods), credential sanitization, auto-connect sessions
+- TypeSerializer: bidirectional JSON serialization for all OPC UA types and v4.0.0 DTOs
 - SessionStore: in-memory session registry with expiration
 
 ### Installation
@@ -91,6 +92,50 @@ Auth priority: OPCUA_AUTH_TOKEN env > --auth-token-file > --auth-token
 ### Running as Service
 
 systemd or Supervisor supported. See doc/daemon.md for examples.
+
+### Auto-Publish
+
+When `autoPublish: true` and an `EventDispatcherInterface` is provided, the daemon automatically calls `publish()` for sessions with active subscriptions. The client's internal `dispatchPublishEvents()` fires PSR-14 events (`DataChangeReceived`, `EventNotificationReceived`, `AlarmActivated`, `SubscriptionKeepAlive`, etc.) — no manual publish loop needed.
+
+```php
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,
+    autoPublish: true,
+);
+$daemon->run();
+```
+
+Acknowledgements are tracked internally. Self-rescheduling timers adapt to each session's minimum publishing interval. When `moreNotifications` is true, the next publish fires with 10ms delay. On connection errors, recovery is attempted automatically. After 5 consecutive generic errors, auto-publish stops for that session.
+
+Manual `publish()` via IPC is blocked while auto-publish is active (returns `auto_publish_active` error).
+
+### Auto-Connect
+
+Pre-configure connections to auto-connect at daemon startup:
+
+```php
+$daemon->autoConnect([
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'config' => ['username' => 'op', 'password' => 'secret', 'opcuaTimeout' => 3.0],
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                ],
+                'event_monitored_items' => [
+                    ['node_id' => 'i=2253', 'client_handle' => 10],
+                ],
+            ],
+        ],
+    ],
+]);
+```
+
+Connections are established on the first event loop tick. Failed connections are logged but don't prevent the daemon from starting.
 
 ---
 
@@ -359,7 +404,8 @@ src/
 │   └── SocketConnection.php        # Unix socket transport
 ├── Daemon/
 │   ├── SessionManagerDaemon.php    # ReactPHP daemon
-│   ├── CommandHandler.php          # Command dispatch + security
+│   ├── AutoPublisher.php           # Per-session auto-publish cycle manager
+│   ├── CommandHandler.php          # Command dispatch + security + auto-connect
 │   ├── Session.php                 # Session wrapper
 │   └── SessionStore.php            # In-memory registry
 ├── Serialization/
@@ -376,9 +422,10 @@ src/
 
 - PhpOpcua\SessionManager\Client\ManagedClient — implements OpcUaClientInterface, proxies to daemon
 - PhpOpcua\SessionManager\Client\SocketConnection — static send() for Unix socket JSON transport
-- PhpOpcua\SessionManager\Daemon\SessionManagerDaemon — ReactPHP daemon with cleanup and signal handling
-- PhpOpcua\SessionManager\Daemon\CommandHandler — IPC command processor with 37-method whitelist
-- PhpOpcua\SessionManager\Daemon\Session — readonly id, client, endpointUrl, config; mutable lastUsed
+- PhpOpcua\SessionManager\Daemon\SessionManagerDaemon — ReactPHP daemon with cleanup, signal handling, auto-publish, auto-connect
+- PhpOpcua\SessionManager\Daemon\AutoPublisher — per-session auto-publish cycle with self-rescheduling timers and ack management
+- PhpOpcua\SessionManager\Daemon\CommandHandler — IPC command processor with 37-method whitelist, auto-connect sessions
+- PhpOpcua\SessionManager\Daemon\Session — readonly id, client, endpointUrl, config; mutable lastUsed; subscription interval tracking
 - PhpOpcua\SessionManager\Daemon\SessionStore — create, get, remove, touch, getExpired, count, all
 - PhpOpcua\SessionManager\Serialization\TypeSerializer — serialize/deserialize for all OPC UA types and DTOs
 - PhpOpcua\SessionManager\Exception\DaemonException — socket/IPC errors

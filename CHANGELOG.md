@@ -1,5 +1,26 @@
 # Changelog
 
+## [4.0.3] - 2026-04-08
+
+### Added
+
+- **Auto-publish.** When an `EventDispatcherInterface` is provided and `autoPublish` is enabled, the daemon automatically calls `publish()` for every session that has active subscriptions. The client's existing PSR-14 event dispatch fires `DataChangeReceived`, `EventNotificationReceived`, `AlarmActivated`, and all other subscription events automatically — no manual publish loop required. Acknowledgements are tracked and sent internally. A self-rescheduling one-shot timer adapts to each session's minimum publishing interval.
+- **`AutoPublisher`** — new internal class managing per-session publish cycles with self-rescheduling timers, automatic acknowledgement tracking, connection recovery, and backoff on consecutive errors (stops after 5).
+- **Auto-connect.** `SessionManagerDaemon::autoConnect(array $connections)` accepts pre-configured connection definitions. On the first event loop tick after startup, the daemon connects to each endpoint, creates subscriptions, and registers monitored items and event monitored items as specified. Combined with auto-publish, this enables fully declarative monitoring — zero application code needed.
+- **`CommandHandler::autoConnectSession()`** — opens a session to a given endpoint and creates subscriptions with monitored items in a single call. Subscription tracking (and auto-publish start) is wired automatically.
+- **Event dispatcher injection.** `CommandHandler` accepts an optional `EventDispatcherInterface` and injects it into every `ClientBuilder` created via `handleOpen()`. This enables PSR-14 event delivery for all OPC UA client events in daemon-managed sessions.
+- **Manual `publish()` blocking.** When auto-publish is active for a session, manual `publish()` calls via IPC return an `auto_publish_active` error to prevent conflicting publish cycles.
+- `Session::getMinPublishingInterval()` — returns the minimum publishing interval (in seconds) across all tracked subscriptions, used by `AutoPublisher` for timer scheduling.
+- `Session::addSubscription()` now accepts an optional `float $publishingInterval` parameter (default 500.0 ms) to track the revised publishing interval from `SubscriptionResult`.
+- `CommandHandler::attemptSessionRecovery()` visibility changed from `private` to `public` to allow the daemon to pass it as a recovery callback to `AutoPublisher`.
+
+### Changed
+
+- `SessionManagerDaemon` constructor accepts two new optional parameters: `?EventDispatcherInterface $clientEventDispatcher` and `bool $autoPublish`.
+- `CommandHandler` constructor accepts a new optional parameter: `?EventDispatcherInterface $clientEventDispatcher`.
+- `trackSubscriptionChanges()` now stores `revisedPublishingInterval` from `SubscriptionResult` and triggers `AutoPublisher::startSession()`/`stopSession()` when a session's first subscription is created or its last subscription is deleted.
+- `cleanupExpiredSessions()` and `shutdown()` now stop auto-publish timers before disconnecting sessions.
+
 ## [4.0.2] - 2026-04-07
 
 ### Changed

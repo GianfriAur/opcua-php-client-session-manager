@@ -240,6 +240,148 @@ $client->disconnect();
 - If the OPC UA connection breaks, the daemon auto-reconnects and transfers subscriptions
 - Call `publish()` regularly to consume notifications — they accumulate in the daemon
 - Always `deleteSubscription()` when no longer needed to free server resources
+- **Alternative:** use auto-publish (see "Skill: Auto-Publish") to eliminate the manual `publish()` loop entirely — the daemon calls `publish()` automatically and dispatches PSR-14 events
+
+---
+
+## Skill: Auto-Publish (Automatic Subscription Monitoring)
+
+### When to use
+The user wants subscriptions to be monitored automatically by the daemon without a manual `publish()` loop.
+
+### How it works
+When the daemon is started with a PSR-14 `EventDispatcherInterface` and `autoPublish: true`, it automatically calls `publish()` for every session that has active subscriptions. The client's internal event dispatch fires `DataChangeReceived`, `EventNotificationReceived`, `AlarmActivated`, `SubscriptionKeepAlive`, and all other subscription events. Acknowledgements are tracked and sent internally.
+
+### Standalone daemon with auto-publish
+
+```php
+use PhpOpcua\SessionManager\Daemon\SessionManagerDaemon;
+use Psr\EventDispatcher\EventDispatcherInterface;
+
+$dispatcher = /* your PSR-14 event dispatcher */;
+
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,
+    autoPublish: true,
+);
+
+$daemon->run();
+```
+
+### Auto-connect with pre-configured subscriptions
+
+```php
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,
+    autoPublish: true,
+);
+
+$daemon->autoConnect([
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'config' => ['username' => 'operator', 'password' => 'secret'],
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                    ['node_id' => 'ns=2;s=Pressure', 'client_handle' => 2],
+                ],
+                'event_monitored_items' => [
+                    [
+                        'node_id' => 'i=2253',
+                        'client_handle' => 10,
+                        'select_fields' => ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
+                    ],
+                ],
+            ],
+        ],
+    ],
+]);
+
+$daemon->run();
+```
+
+### Register event listeners
+
+```php
+use PhpOpcua\Client\Event\DataChangeReceived;
+use PhpOpcua\Client\Event\EventNotificationReceived;
+use PhpOpcua\Client\Event\AlarmActivated;
+
+$dispatcher->listen(DataChangeReceived::class, function (DataChangeReceived $e) {
+    echo "Sub {$e->subscriptionId}, handle {$e->clientHandle}: {$e->dataValue->getValue()}\n";
+});
+
+$dispatcher->listen(AlarmActivated::class, function (AlarmActivated $e) {
+    echo "ALARM from {$e->sourceName}: {$e->message} (severity: {$e->severity})\n";
+});
+```
+
+### Laravel integration
+
+```php
+// config/opcua.php
+'session_manager' => [
+    'auto_publish' => true,
+],
+'connections' => [
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'auto_connect' => true,
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                ],
+            ],
+        ],
+    ],
+],
+
+// EventServiceProvider
+Event::listen(DataChangeReceived::class, function (DataChangeReceived $e) {
+    DB::table('sensor_readings')->insert([
+        'subscription_id' => $e->subscriptionId,
+        'client_handle' => $e->clientHandle,
+        'value' => $e->dataValue->getValue(),
+    ]);
+});
+
+// Start daemon
+// php artisan opcua:session
+```
+
+### Runtime subscriptions with auto-publish
+
+Auto-publish also works for subscriptions created at runtime via `ManagedClient`. Any session that gains a subscription gets auto-published automatically:
+
+```php
+$client = new ManagedClient();
+$client->connect('opc.tcp://192.168.1.10:4840');
+
+$sub = $client->createSubscription(publishingInterval: 500.0);
+$client->createMonitoredItems($sub->subscriptionId, [
+    ['nodeId' => 'ns=2;s=Temperature', 'clientHandle' => 1],
+]);
+// No publish() loop needed — daemon handles it
+```
+
+### Important rules
+- Auto-publish requires both `clientEventDispatcher` and `autoPublish: true` on the daemon
+- When auto-publish is active for a session, manual `publish()` calls via IPC return an `auto_publish_active` error
+- The daemon dispatches the same PSR-14 events as `Client::publish()`: `DataChangeReceived`, `EventNotificationReceived`, `AlarmActivated`, `AlarmDeactivated`, `SubscriptionKeepAlive`, etc.
+- Auto-publish starts when a session creates its first subscription and stops when the last subscription is deleted
+- `publish()` is a blocking synchronous call — it blocks the daemon's event loop for up to `maxKeepAliveCount × publishingInterval` ms. Use a lower `maxKeepAliveCount` (3–5) to reduce maximum blocking
+- Connection errors trigger automatic recovery (reconnect + subscription transfer)
+- After 5 consecutive non-connection errors, auto-publish stops for that session
+- `autoConnect()` must be called before `$daemon->run()` — connections are established on the first event loop tick
+- In Laravel, `auto_connect` is per-connection (not global) — only connections with `'auto_connect' => true` and `subscriptions` defined are auto-connected
 
 ---
 
@@ -347,6 +489,7 @@ OPCUA_SOCKET_PATH=
 OPCUA_AUTH_TOKEN=my-secret
 OPCUA_SESSION_TIMEOUT=600
 OPCUA_MAX_SESSIONS=100
+OPCUA_AUTO_PUBLISH=true
 ```
 
 ### How it works

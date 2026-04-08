@@ -297,7 +297,101 @@ The daemon uses ReactPHP's event loop with:
 ### Shutdown Sequence
 
 1. SIGTERM/SIGINT received
-2. All active sessions disconnected
-3. Unix socket server closed
-4. Socket file and PID file removed
-5. Event loop stopped
+2. Auto-publish timers stopped (if active)
+3. All active sessions disconnected
+4. Unix socket server closed
+5. Socket file and PID file removed
+6. Event loop stopped
+
+## Auto-Publish
+
+When the daemon is started with a PSR-14 `EventDispatcherInterface` and `autoPublish: true`, it automatically manages the publish cycle for sessions with active subscriptions.
+
+### How It Works
+
+1. A session creates its first subscription via `createSubscription()` → the daemon starts an auto-publish timer for that session
+2. The timer calls `Client::publish()`, which dispatches PSR-14 events internally: `DataChangeReceived`, `EventNotificationReceived`, `AlarmActivated`, `SubscriptionKeepAlive`, etc.
+3. Acknowledgements are tracked and sent automatically on the next publish call
+4. When `moreNotifications` is `true`, the next publish is scheduled with near-zero delay to drain queued notifications quickly
+5. When all subscriptions are deleted, the auto-publish timer is stopped
+
+### Timer Scheduling
+
+Auto-publish uses self-rescheduling one-shot timers (not periodic timers) to avoid callback accumulation when `publish()` blocks. The next timer delay depends on the result:
+
+| Scenario | Next delay |
+|----------|-----------|
+| Notifications received, `moreNotifications: false` | `session.minPublishingInterval × 0.75` |
+| Notifications received, `moreNotifications: true` | 10ms (drain quickly) |
+| Connection error, recovery succeeded | 1s |
+| Generic error (transient) | 5s (backoff) |
+| 5 consecutive generic errors | auto-publish stopped |
+
+### Blocking Behavior
+
+`Client::publish()` is a synchronous call that blocks the ReactPHP event loop until the OPC UA server responds with a notification or a keep-alive. The maximum block duration is bounded by `maxKeepAliveCount × publishingInterval` (default: 10 × 500ms = 5s). IPC requests queue during the block but are not lost (30s IPC timeout). To minimize blocking, use a lower `maxKeepAliveCount` (e.g., 3–5).
+
+### Manual Publish Blocking
+
+When auto-publish is active for a session, manual `publish()` calls via IPC return an `auto_publish_active` error. This prevents conflicting publish cycles.
+
+### Programmatic Configuration
+
+```php
+use PhpOpcua\SessionManager\Daemon\SessionManagerDaemon;
+use Psr\EventDispatcher\EventDispatcherInterface;
+
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,  // PSR-14 dispatcher
+    autoPublish: true,
+);
+
+$daemon->run();
+```
+
+## Auto-Connect
+
+The daemon can auto-connect to pre-configured endpoints and register subscriptions at startup. Combined with auto-publish, this enables fully declarative monitoring with zero application code.
+
+### Programmatic Configuration
+
+```php
+$daemon = new SessionManagerDaemon(
+    socketPath: '/tmp/opcua.sock',
+    clientEventDispatcher: $dispatcher,
+    autoPublish: true,
+);
+
+$daemon->autoConnect([
+    'plc-1' => [
+        'endpoint' => 'opc.tcp://192.168.1.10:4840',
+        'config' => [
+            'username' => 'operator',
+            'password' => 'secret',
+            'opcuaTimeout' => 3.0,
+        ],
+        'subscriptions' => [
+            [
+                'publishing_interval' => 500.0,
+                'max_keep_alive_count' => 5,
+                'monitored_items' => [
+                    ['node_id' => 'ns=2;s=Temperature', 'client_handle' => 1],
+                    ['node_id' => 'ns=2;s=Pressure', 'client_handle' => 2],
+                ],
+                'event_monitored_items' => [
+                    [
+                        'node_id' => 'i=2253',
+                        'client_handle' => 10,
+                        'select_fields' => ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
+                    ],
+                ],
+            ],
+        ],
+    ],
+]);
+
+$daemon->run();
+```
+
+Connections are established on the first event loop tick after the daemon starts. Failed connections are logged but do not prevent the daemon from starting.
