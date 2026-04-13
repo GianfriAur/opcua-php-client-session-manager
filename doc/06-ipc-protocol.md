@@ -101,6 +101,21 @@ Create a new session.
 }
 ```
 
+ECC example (no certificate paths needed — auto-generated):
+
+```json
+{
+  "command": "open",
+  "endpointUrl": "opc.tcp://localhost:4840",
+  "config": {
+    "securityPolicy": "http://opcfoundation.org/UA/SecurityPolicy#ECC_nistP256",
+    "securityMode": 3,
+    "username": "admin",
+    "password": "secret"
+  }
+}
+```
+
 ```json
 {"success": true, "data": {"sessionId": "a1b2c3d4..."}}
 ```

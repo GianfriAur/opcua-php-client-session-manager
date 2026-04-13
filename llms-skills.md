@@ -117,10 +117,16 @@ $client = new ManagedClient(
 );
 
 // Security — set BEFORE connect()
+// RSA security
 $client->setSecurityPolicy(SecurityPolicy::Basic256Sha256);
 $client->setSecurityMode(SecurityMode::SignAndEncrypt);
 $client->setClientCertificate('/certs/client.pem', '/certs/client.key', '/certs/ca.pem');
 $client->setUserCredentials('operator', 'secret');
+
+// Or ECC security (auto-generated ECC certificate, no setClientCertificate needed)
+// $client->setSecurityPolicy(SecurityPolicy::EccNistP256);
+// $client->setSecurityMode(SecurityMode::SignAndEncrypt);
+// $client->setUserCredentials('operator', 'secret');
 
 // Behavior — set BEFORE connect()
 $client->setTimeout(10.0);               // OPC UA operation timeout

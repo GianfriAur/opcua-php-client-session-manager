@@ -158,9 +158,9 @@ $client->setTimeout(10.0);
 $client->setAutoRetry(3);
 $client->setBatchSize(50);
 $client->setDefaultBrowseMaxDepth(20);
-$client->setSecurityPolicy(SecurityPolicy::Basic256Sha256);
+$client->setSecurityPolicy(SecurityPolicy::Basic256Sha256); // or EccNistP256, EccNistP384, EccBrainpoolP256r1, EccBrainpoolP384r1
 $client->setSecurityMode(SecurityMode::SignAndEncrypt);
-$client->setClientCertificate('/certs/client.pem', '/certs/client.key', '/certs/ca.pem');
+$client->setClientCertificate('/certs/client.pem', '/certs/client.key', '/certs/ca.pem'); // optional for ECC — auto-generated
 $client->setUserCredentials('operator', 'secret');
 $client->setUserCertificate('/certs/user.pem', '/certs/user.key');
 $client->setLogger($logger);

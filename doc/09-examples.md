@@ -145,9 +145,32 @@ $client = new ManagedClient(
     authToken: trim(file_get_contents('/etc/opcua/daemon.token')),
 );
 
+// RSA security
 $client->setSecurityPolicy(SecurityPolicy::Basic256Sha256);
 $client->setSecurityMode(SecurityMode::SignAndEncrypt);
 $client->setClientCertificate('/certs/client.pem', '/certs/client.key', '/certs/ca.pem');
+$client->setUserCredentials('operator', 'secret');
+$client->connect('opc.tcp://192.168.1.100:4840');
+
+$value = $client->read('ns=2;i=1001');
+echo $value->getValue();
+```
+
+### ECC Security
+
+```php
+use PhpOpcua\Client\Security\SecurityPolicy;
+use PhpOpcua\Client\Security\SecurityMode;
+use PhpOpcua\SessionManager\Client\ManagedClient;
+
+$client = new ManagedClient(
+    socketPath: '/var/run/opcua-session-manager.sock',
+    authToken: trim(file_get_contents('/etc/opcua/daemon.token')),
+);
+
+// ECC security — no setClientCertificate needed, auto-generated
+$client->setSecurityPolicy(SecurityPolicy::EccNistP256);
+$client->setSecurityMode(SecurityMode::SignAndEncrypt);
 $client->setUserCredentials('operator', 'secret');
 $client->connect('opc.tcp://192.168.1.100:4840');
 

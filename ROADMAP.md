@@ -1,6 +1,6 @@
 # Roadmap
 
-## v4.1.0
+## v4.2.0
 
 ### Features
 
@@ -11,6 +11,13 @@
 
 - [ ] Config object — replace the `$config` associative array passed through IPC with a typed `SessionConfig` DTO for type safety
 - [ ] CommandHandler method dispatch — replace the growing `match` block in `deserializeParams()` with a registry pattern for cleaner extensibility
+
+## Completed in v4.1.0
+
+- [x] **ECC security policy support** — all daemon operations work with `ECC_nistP256`, `ECC_nistP384`, `ECC_brainpoolP256r1`, `ECC_brainpoolP384r1` (auto-generated ECC certificates, EccEncryptedSecret for username/password)
+- [x] Bumped `php-opcua/opcua-client` dependency from `^4.0` to `^4.1`
+- [x] Security support expanded from 6 to **10 policies** (6 RSA + 4 ECC)
+- [x] Updated all documentation (README, doc/, llms.txt, llms-full.txt, llms-skills.md)
 
 ## Completed in v4.0.0
 

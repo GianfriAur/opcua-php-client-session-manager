@@ -200,6 +200,7 @@ $client = new ManagedClient(
     authToken: trim(file_get_contents('/etc/opcua/daemon.token')),
 );
 
+// RSA security
 $client->setSecurityPolicy(SecurityPolicy::Basic256Sha256);
 $client->setSecurityMode(SecurityMode::SignAndEncrypt);
 $client->setClientCertificate('/certs/client.pem', '/certs/client.key');
@@ -207,7 +208,18 @@ $client->setUserCredentials('operator', 'secret');
 $client->connect('opc.tcp://192.168.1.100:4840');
 ```
 
-> **Tip:** Skip `setClientCertificate()` and a self-signed cert gets auto-generated in memory — perfect for quick tests or servers with auto-accept.
+```php
+// ECC security (auto-generated ECC certificate)
+$client = new ManagedClient();
+$client->setSecurityPolicy(SecurityPolicy::EccNistP256);
+$client->setSecurityMode(SecurityMode::SignAndEncrypt);
+$client->setUserCredentials('operator', 'secret');
+$client->connect('opc.tcp://192.168.1.100:4840');
+```
+
+> **Tip:** Skip `setClientCertificate()` and a self-signed cert gets auto-generated in memory (RSA for RSA policies, ECC for ECC policies) — perfect for quick tests or servers with auto-accept.
+
+> **ECC disclaimer:** ECC security policies (`EccNistP256`, `EccNistP384`, `EccBrainpoolP256r1`, `EccBrainpoolP384r1`) are fully implemented and tested against the OPC Foundation's UA-.NETStandard reference stack. However, no commercial OPC UA vendor supports ECC endpoints yet.
 
 ## How It Works
 
@@ -254,7 +266,7 @@ Request N:                       [read 5ms]           → total ~5ms
 | **Transfer & Recovery** | `transferSubscriptions()` and `republish()` for session migration |
 | **PSR-3 Logging** | Optional structured logging via any PSR-3 logger |
 | **PSR-16 Cache** | Cache management forwarded to daemon — `invalidateCache()`, `flushCache()` |
-| **Security** | 6 policies, 3 auth modes, IPC authentication, method whitelist |
+| **Security** | 10 policies (RSA + ECC), 3 auth modes, IPC authentication, method whitelist |
 | **Auto-Retry** | Automatic reconnect on connection failures |
 | **Auto-Batching** | Transparent batching for `readMulti()`/`writeMulti()` |
 | **Auto-Publish** | Daemon automatically calls `publish()` for sessions with subscriptions and dispatches PSR-14 events |
@@ -287,7 +299,7 @@ The daemon implements multiple layers of security hardening:
 
 - **IPC authentication** — shared-secret token validated with timing-safe `hash_equals()`
 - **Socket permissions** — `0600` by default (owner-only)
-- **Method whitelist** — only 37 documented OPC UA operations allowed via `query`
+- **Method whitelist** — only 45 documented OPC UA operations allowed via `query`
 - **Credential protection** — passwords and private key paths stripped immediately after connection
 - **Session limits** — configurable maximum to prevent resource exhaustion
 - **Certificate path restrictions** — `--allowed-cert-dirs` constrains certificate directories
@@ -342,7 +354,7 @@ OPCUA_AUTH_TOKEN=$(cat /etc/opcua/daemon.token) php bin/opcua-session-manager \
 ./vendor/bin/pest tests/Integration/ --group=integration   # integration only
 ```
 
-380+ tests (unit + integration). Integration tests run against [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite) — a Docker-based OPC UA environment built on the OPC Foundation's UA-.NETStandard reference implementation — covering browse, read/write, subscriptions, method calls, path resolution, connection state, security, type serialization, session persistence, session recovery, and all v4.0.0 DTOs.
+456+ tests (unit + integration). Integration tests run against [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite) — a Docker-based OPC UA environment built on the OPC Foundation's UA-.NETStandard reference implementation — covering browse, read/write, subscriptions, method calls, path resolution, connection state, security, type serialization, session persistence, session recovery, and all v4.0.0 DTOs.
 
 > **Note on coverage:** `SessionManagerDaemon` is excluded from coverage reports because it runs as a separate long-lived process (ReactPHP event loop). PHP coverage tools (pcov, xdebug) only instrument the test runner process — they cannot track code executing inside a subprocess started via `proc_open()`. The daemon is fully tested by the integration suite, which starts a real daemon, sends IPC commands, and verifies responses. This is a known limitation shared by other daemon-based PHP packages (Laravel Horizon, Symfony Messenger, RoadRunner workers).
 

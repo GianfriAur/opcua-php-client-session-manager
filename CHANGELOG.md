@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.1.0] - 2026-04-13
+
+### Added
+
+- **ECC security policy support.** The daemon and `ManagedClient` now support the 4 new Elliptic Curve Cryptography policies introduced in `opcua-client` v4.1.0:
+  - `SecurityPolicy::EccNistP256` (NIST P-256, AES-128-CBC, SHA-256)
+  - `SecurityPolicy::EccNistP384` (NIST P-384, AES-256-CBC, SHA-384)
+  - `SecurityPolicy::EccBrainpoolP256r1` (Brainpool P-256, AES-128-CBC, SHA-256)
+  - `SecurityPolicy::EccBrainpoolP384r1` (Brainpool P-384, AES-256-CBC, SHA-384)
+  - No code changes required — ECC policies work transparently via `SecurityPolicy::from()` and `ClientBuilder`. ECC certificates are auto-generated when no client certificate is provided. Username/password authentication uses the `EccEncryptedSecret` protocol automatically.
+  - **ECC disclaimer:** No commercial OPC UA vendor supports ECC endpoints yet. This implementation is tested exclusively against the OPC Foundation's UA-.NETStandard reference stack.
+
+### Changed
+
+- Bumped minimum `php-opcua/opcua-client` dependency from `^4.0` to `^4.1`.
+- Security support expanded from 6 to **10 policies** (6 RSA + 4 ECC).
+- Updated CI test server suite from `php-opcua/uanetstandard-test-suite@v1.0.0` to `@v1.1.0`.
+- Updated documentation (README, doc/, llms.txt, llms-full.txt, llms-skills.md) to reflect ECC support and add ECC examples.
+
 ## [4.0.3] - 2026-04-08
 
 ### Added

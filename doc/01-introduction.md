@@ -57,7 +57,7 @@ $client->disconnect();
 | **Session** | Persistence across requests, automatic cleanup, graceful shutdown |
 | **OPC UA** | Browse, read, write, method calls, subscriptions, history, path resolution, type discovery |
 | **API** | String NodeIds, fluent builders, typed DTO returns, auto-retry, auto-batching |
-| **Security** | 6 policies, 3 auth modes, IPC auth token, method whitelist, credential stripping |
+| **Security** | 10 policies (RSA + ECC), 3 auth modes, IPC auth token, method whitelist, credential stripping |
 | **Integrations** | PSR-3 logging, PSR-16 cache, transfer & recovery |
 
 ## Architecture

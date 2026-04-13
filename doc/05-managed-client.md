@@ -49,11 +49,17 @@ $client->setDefaultBrowseMaxDepth(20);      // recursive browse depth
 use PhpOpcua\Client\Security\SecurityPolicy;
 use PhpOpcua\Client\Security\SecurityMode;
 
+// RSA security
 $client->setSecurityPolicy(SecurityPolicy::Basic256Sha256);
 $client->setSecurityMode(SecurityMode::SignAndEncrypt);
 $client->setClientCertificate('/certs/client.pem', '/certs/client.key', '/certs/ca.pem');
 $client->setUserCredentials('operator', 'secret');
 $client->setUserCertificate('/certs/user.pem', '/certs/user.key');
+
+// ECC security (auto-generated ECC certificate, no setClientCertificate needed)
+$client->setSecurityPolicy(SecurityPolicy::EccNistP256);
+$client->setSecurityMode(SecurityMode::SignAndEncrypt);
+$client->setUserCredentials('operator', 'secret');
 ```
 
 ### Logging
