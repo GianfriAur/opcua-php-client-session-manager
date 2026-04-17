@@ -1,6 +1,6 @@
 # OPC UA PHP Client Session Manager — Full Documentation
 
-> Daemon-based session manager for opcua-client. Keeps OPC UA connections alive across PHP requests via a ReactPHP daemon and Unix socket IPC. ManagedClient is a drop-in replacement for Client — same OpcUaClientInterface, persistent sessions.
+> Daemon-based session manager for opcua-client. Keeps OPC UA connections alive across PHP requests via a ReactPHP daemon and a local IPC channel (Unix-domain socket on Linux/macOS, TCP loopback on Windows — auto-selected). ManagedClient is a drop-in replacement for Client — same OpcUaClientInterface, persistent sessions.
 
 Package: php-opcua/opcua-session-manager
 Repository: https://github.com/php-opcua/opcua-session-manager
@@ -13,7 +13,7 @@ Dependencies: php-opcua/opcua-client ^4.0, react/event-loop ^1.5, react/socket ^
 
 ## 1. Overview
 
-PHP's request/response model destroys all state at the end of every request. OPC UA requires a 5-step handshake (TCP → Hello/Ack → OpenSecureChannel → CreateSession → ActivateSession) costing 50–200ms. This package solves the problem with a long-running ReactPHP daemon that holds sessions in memory, communicating via Unix socket IPC.
+PHP's request/response model destroys all state at the end of every request. OPC UA requires a 5-step handshake (TCP → Hello/Ack → OpenSecureChannel → CreateSession → ActivateSession) costing 50–200ms. This package solves the problem with a long-running ReactPHP daemon that holds sessions in memory, communicating via local IPC (Unix-domain socket on Linux/macOS, TCP loopback on Windows — auto-selected).
 
 ### Architecture
 
@@ -310,7 +310,15 @@ try {
 
 ## 4. IPC Protocol
 
-Transport: Unix domain socket, JSON + \n delimiter, 1MB max, 30s timeout
+Transport: abstracted via `PhpOpcua\SessionManager\Ipc\TransportInterface` + `TransportFactory`.
+`TransportFactory::create($endpoint)` turns an endpoint string into the right `TransportInterface`:
+  - `unix:///absolute/path.sock` → `UnixSocketTransport`
+  - `tcp://127.0.0.1:<port>` / `tcp://[::1]:<port>` → `TcpLoopbackTransport` (non-loopback hosts refused at construction)
+  - scheme-less path → `UnixSocketTransport` (backwards-compatible with pre-v4.2.0 `--socket /tmp/foo.sock`)
+`TransportFactory::defaultEndpoint()` returns `unix:///tmp/opcua-session-manager.sock` on Linux/macOS and `tcp://127.0.0.1:9990` on Windows.
+`SocketConnection::send($endpoint, $payload)` delegates to the factory + `TransportInterface` (drop-in replacement for the pre-v4.2.0 Unix-socket inline implementation). `SocketConnection::sendVia(TransportInterface, $payload)` exposed for callers holding a long-lived transport.
+Daemon side: `SessionManagerDaemon` listener is now `React\Socket\SocketServer` and accepts either `unix://` or `tcp://` URIs. A construction-time guard refuses any `tcp://` bind to a non-loopback host; `chmod` + socket-file cleanup apply only to Unix endpoints. PID file is placed next to the socket file on Unix, or under `sys_get_temp_dir()` keyed by endpoint slug for TCP.
+NDJSON framing, binary-mode streams (Windows-safe), 16 MiB frame cap, 32-level JSON nesting cap.
 
 ### Commands
 
@@ -318,7 +326,9 @@ Transport: Unix domain socket, JSON + \n delimiter, 1MB max, 30s timeout
 **list**: active sessions (sanitized) → {count, sessions[]}
 **open**: create session → {sessionId}
 **close**: disconnect session → null
-**query**: execute OPC UA method → serialized result
+**query**: execute whitelisted OPC UA method → TypeSerializer-encoded result
+**describe**: return {methods, modules, wireClasses, enumClasses, wireTypeIds} of the session's underlying client — ManagedClient caches this on first call and uses it for hasMethod/hasModule/getRegisteredMethods/getLoadedModules + to mirror the daemon's WireTypeRegistry
+**invoke**: generic method dispatch {method, args: [<wire-encoded>...]} → {data: <wire-encoded>}. Gated by $client->hasMethod($method) (not by ALLOWED_METHODS). Third-party module methods registered via ClientBuilder::addModule() are reachable here with zero plumbing. Args and results travel through WireMessageCodec with the describe-mirrored registry as the authoritative type allowlist.
 
 ### Authentication
 
@@ -335,6 +345,33 @@ History: historyReadRaw, historyReadProcessed, historyReadAtTime
 State: isConnected, getConnectionState, reconnect
 Config: getTimeout, getAutoRetry, getBatchSize, getDefaultBrowseMaxDepth, getServerMaxNodesPerRead, getServerMaxNodesPerWrite
 Discovery/Cache: getEndpoints, discoverDataTypes, invalidateCache, flushCache
+
+### Wire Pipeline (describe + invoke)
+
+- Wire format: every non-scalar typed value is `{"__t": "<id>", ...}` where `<id>` is registered on both sides. Unregistered `__t` values are rejected at decode — no `unserialize()` anywhere, no PHP gadget-chain surface.
+- Registry contents: core types (NodeId, QualifiedName, LocalizedText, DataValue, Variant, ExtensionObject, BrowseNode, ReferenceDescription, EndpointDescription, UserTokenPolicy) + core enums (BuiltinType, NodeClass, BrowseDirection, ConnectionState) + each loaded module's getSerializableTypes contribution (SubscriptionResult, TransferResult, MonitoredItemResult, MonitoredItemModifyResult, PublishResult, SetTriggeringResult, CallResult, BrowsePathResult, BrowsePathTarget, BrowseResultSet, AddNodesResult, BuildInfo, …).
+- ManagedClient builds its own WireMessageCodec from the describe response — classes the daemon declares but the client cannot load are skipped (decode fails loudly if they appear in an invoke payload).
+- NodeManagement methods (addNodes, deleteNodes, addReferences, deleteReferences) delegate through invoke in v4.2.0 — they succeed only when the daemon opted into NodeManagementModule via ClientBuilder::addModule().
+
+### Query Param Deserialization (registry pattern, v4.2.0)
+
+The IPC `query` command still goes through the legacy `TypeSerializer` path (wire migration deferred to v5), but the argument-decoding side now lives behind a registry.
+
+- `PhpOpcua\SessionManager\Serialization\ParamDeserializerInterface` — `supports(string $method): bool` + `deserialize(string $method, array $params): array`.
+- `PhpOpcua\SessionManager\Serialization\ParamDeserializerRegistry` — ordered list of deserializers, consulted first-match-wins.
+- `PhpOpcua\SessionManager\Serialization\BuiltInParamDeserializer` — the shipped implementation covering every method in `CommandHandler::ALLOWED_METHODS` (45 methods). Encapsulates what used to be the 200-line `match` inside `CommandHandler::deserializeParams()`.
+- Third-party modules that register custom service methods on the daemon's client ship their own deserializer and plug it in via `CommandHandler::registerParamDeserializer()`.
+
+### Session Config DTO (v4.2.0)
+
+The `open` command's `config` payload is consumed through `PhpOpcua\SessionManager\Daemon\SessionConfig` — a readonly DTO with one typed property per knob (`opcuaTimeout`, `autoRetry`, `securityPolicy`, `username`/`password`, `clientCertPath`/`clientKeyPath`/`caCertPath`, `userCertPath`/`userKeyPath`, `trustStorePath`, `trustPolicy`, `autoAccept`/`autoAcceptForce`, `autoDetectWriteType`, `readMetadataCache`, `batchSize`, `defaultBrowseMaxDepth`, `securityMode`).
+
+Helpers:
+- `SessionConfig::fromArray(array)` — parses the wire JSON with scalar coercion; unknown keys are silently ignored (forwards-compatible).
+- `SessionConfig::toArray(): array` — emits only non-null fields.
+- `SessionConfig::sanitized(): self` — returns a copy with `password`/`clientKeyPath`/`caCertPath`/`userKeyPath` nulled. `SESSION_CONFIG::SENSITIVE_FIELDS` lists them.
+
+`CommandHandler::handleOpen()` is now a two-step flow: `SessionConfig::fromArray($cmd['config'])` → `$this->buildClientFromConfig($endpointUrl, $config)` (private helper) → `Session` creation. Wire format is unchanged for backwards compatibility.
 
 ---
 

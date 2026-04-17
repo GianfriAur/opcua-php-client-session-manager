@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 use PhpOpcua\Client\Client;
 use PhpOpcua\Client\ClientBuilder;
-use PhpOpcua\Client\Types\MonitoredItemResult;
-use PhpOpcua\Client\Types\PublishResult;
-use PhpOpcua\Client\Types\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
 use PhpOpcua\SessionManager\Daemon\AutoPublisher;
 use PhpOpcua\SessionManager\Daemon\CommandHandler;
 use PhpOpcua\SessionManager\Daemon\Session;

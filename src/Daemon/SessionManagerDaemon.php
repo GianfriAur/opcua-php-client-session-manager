@@ -8,10 +8,12 @@ use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use Psr\SimpleCache\CacheInterface;
+use PhpOpcua\SessionManager\Ipc\TransportFactory;
 use React\EventLoop\Loop;
 use React\EventLoop\LoopInterface;
 use React\Socket\ConnectionInterface;
-use React\Socket\UnixServer;
+use React\Socket\ServerInterface;
+use React\Socket\SocketServer;
 use RuntimeException;
 use Throwable;
 
@@ -27,7 +29,7 @@ class SessionManagerDaemon
     private SessionStore $store;
     private CommandHandler $handler;
     private LoopInterface $loop;
-    private ?UnixServer $server = null;
+    private ?ServerInterface $server = null;
     private ?AutoPublisher $autoPublisher = null;
     private string $pidFilePath;
     private int $activeConnections = 0;
@@ -37,7 +39,7 @@ class SessionManagerDaemon
     private array $autoConnections = [];
 
     /**
-     * @param string $socketPath Path to the Unix socket file.
+     * @param string $socketPath Endpoint URI (`unix://…`, `tcp://127.0.0.1:port`) or a Unix socket path. TCP is loopback-only — any non-loopback host throws at listener construction.
      * @param int $timeout Session inactivity timeout in seconds.
      * @param int $cleanupInterval Interval in seconds between expired session cleanup runs.
      * @param ?string $authToken Shared secret for IPC authentication, or null to disable.
@@ -74,7 +76,94 @@ class SessionManagerDaemon
             $this->clientEventDispatcher,
         );
         $this->loop = Loop::get();
-        $this->pidFilePath = $this->socketPath . '.pid';
+        $this->assertLoopbackIfTcp($this->socketPath);
+        $this->pidFilePath = $this->resolvePidFilePath($this->socketPath);
+    }
+
+    /**
+     * Refuse a TCP listen URI that binds to a non-loopback host. Matches the
+     * posture {@see \PhpOpcua\SessionManager\Ipc\TcpLoopbackTransport} enforces
+     * on the client side — exposing the daemon to the network requires an
+     * explicit extra transport layer (TLS, SSH tunnel), not a silent bind to
+     * `0.0.0.0`.
+     *
+     * @param string $endpoint
+     * @return void
+     * @throws RuntimeException If a non-loopback TCP host is specified.
+     */
+    private function assertLoopbackIfTcp(string $endpoint): void
+    {
+        if (! str_starts_with($endpoint, 'tcp://')) {
+            return;
+        }
+
+        $authority = substr($endpoint, strlen('tcp://'));
+        if (str_starts_with($authority, '[')) {
+            $close = strpos($authority, ']');
+            $host = $close !== false ? substr($authority, 1, $close - 1) : '';
+        } else {
+            $colon = strrpos($authority, ':');
+            $host = $colon !== false ? substr($authority, 0, $colon) : $authority;
+        }
+
+        if ($host === '127.0.0.1' || $host === '::1' || $host === 'localhost') {
+            return;
+        }
+        if (str_starts_with($host, '127.')
+            && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false
+        ) {
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'SessionManagerDaemon refuses to bind TCP listener to non-loopback host "%s". '
+            . 'Use 127.0.0.1 or ::1; layer TLS / SSH tunnel explicitly if remote access is required.',
+            $host,
+        ));
+    }
+
+    /**
+     * Compute the PID file path for the given IPC endpoint.
+     *
+     * Unix endpoints append `.pid` next to the socket file; TCP endpoints fall
+     * back to the system temp directory keyed by host+port so that multiple
+     * daemons on the same host don't clobber each other.
+     *
+     * @param string $endpoint
+     * @return string
+     */
+    private function resolvePidFilePath(string $endpoint): string
+    {
+        $unixPath = TransportFactory::toUnixPath($endpoint);
+        if ($unixPath !== null) {
+            return $unixPath . '.pid';
+        }
+
+        $slug = preg_replace('~[^a-zA-Z0-9_.-]+~', '_', $endpoint) ?? 'endpoint';
+
+        return rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR
+            . 'opcua-session-manager-' . $slug . '.pid';
+    }
+
+    /**
+     * Translate the caller-supplied `$socketPath` into the URI understood by
+     * {@see \React\Socket\SocketServer}: scheme-less strings become
+     * `unix://<path>`, explicit `unix://` / `tcp://` URIs pass through.
+     *
+     * TCP endpoints are rejected at server construction by `TcpLoopbackTransport`
+     * if they reference non-loopback hosts, keeping the "local origin only" trust
+     * posture the Unix-socket default grants by filesystem permissions.
+     *
+     * @return string
+     */
+    private function resolveListenUri(): string
+    {
+        $unixPath = TransportFactory::toUnixPath($this->socketPath);
+        if ($unixPath !== null) {
+            return 'unix://' . $unixPath;
+        }
+
+        return $this->socketPath;
     }
 
     /**
@@ -100,13 +189,16 @@ class SessionManagerDaemon
     {
         $this->acquirePidLock();
 
-        if (file_exists($this->socketPath)) {
-            unlink($this->socketPath);
+        $unixPath = TransportFactory::toUnixPath($this->socketPath);
+        if ($unixPath !== null && file_exists($unixPath)) {
+            unlink($unixPath);
         }
 
-        $this->server = new UnixServer($this->socketPath, $this->loop);
+        $this->server = new SocketServer($this->resolveListenUri(), [], $this->loop);
 
-        chmod($this->socketPath, $this->socketMode);
+        if ($unixPath !== null) {
+            chmod($unixPath, $this->socketMode);
+        }
 
         $this->server->on('connection', function (ConnectionInterface $connection) {
             if ($this->activeConnections >= self::MAX_CONCURRENT_CONNECTIONS) {
@@ -193,13 +285,15 @@ class SessionManagerDaemon
             $this->logger->warning('No auth token configured. Any local process can control the daemon.');
         }
 
-        $this->logger->info('OPC UA Session Manager started on {socket}', ['socket' => $this->socketPath]);
+        $this->logger->info('OPC UA Session Manager started on {socket}', ['socket' => $this->resolveListenUri()]);
         $this->logger->info('Timeout: {timeout}s, Cleanup interval: {cleanup}s, Max sessions: {max}', [
             'timeout' => $this->timeout,
             'cleanup' => $this->cleanupInterval,
             'max' => $this->maxSessions,
         ]);
-        $this->logger->info('Socket permissions: {mode}', ['mode' => decoct($this->socketMode)]);
+        if (TransportFactory::toUnixPath($this->socketPath) !== null) {
+            $this->logger->info('Socket permissions: {mode}', ['mode' => decoct($this->socketMode)]);
+        }
 
         $this->setupAutoPublisher();
 
@@ -246,8 +340,9 @@ class SessionManagerDaemon
             $this->server->close();
         }
 
-        if (file_exists($this->socketPath)) {
-            unlink($this->socketPath);
+        $unixPath = TransportFactory::toUnixPath($this->socketPath);
+        if ($unixPath !== null && file_exists($unixPath)) {
+            unlink($unixPath);
         }
 
         $this->releasePidLock();

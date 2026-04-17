@@ -4,21 +4,18 @@ declare(strict_types=1);
 
 namespace PhpOpcua\SessionManager\Daemon;
 
-use DateTimeImmutable;
 use PhpOpcua\Client\ClientBuilder;
 use PhpOpcua\Client\Exception\ConnectionException;
 use PhpOpcua\Client\Security\SecurityMode;
 use PhpOpcua\Client\Security\SecurityPolicy;
 use PhpOpcua\Client\TrustStore\FileTrustStore;
 use PhpOpcua\Client\TrustStore\TrustPolicy;
-use PhpOpcua\Client\Types\BuiltinType;
-use PhpOpcua\Client\Types\BrowseDirection;
-use PhpOpcua\Client\Types\ConnectionState;
-use PhpOpcua\Client\Types\NodeClass;
-use PhpOpcua\Client\Types\NodeId;
-use PhpOpcua\Client\Types\SubscriptionResult;
-use PhpOpcua\Client\Types\TransferResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\TransferResult;
+use PhpOpcua\Client\Wire\WireTypeRegistry;
 use PhpOpcua\SessionManager\Exception\SessionNotFoundException;
+use PhpOpcua\SessionManager\Serialization\BuiltInParamDeserializer;
+use PhpOpcua\SessionManager\Serialization\ParamDeserializerRegistry;
 use PhpOpcua\SessionManager\Serialization\TypeSerializer;
 use InvalidArgumentException;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -89,6 +86,7 @@ class CommandHandler
     ];
 
     private TypeSerializer $serializer;
+    private ParamDeserializerRegistry $paramRegistry;
     private LoggerInterface $clientLogger;
     private ?AutoPublisher $autoPublisher = null;
 
@@ -99,6 +97,7 @@ class CommandHandler
      * @param ?LoggerInterface $clientLogger Logger to inject into each OPC UA Client created by the daemon.
      * @param ?CacheInterface $clientCache Cache driver to inject into each OPC UA Client created by the daemon.
      * @param ?EventDispatcherInterface $clientEventDispatcher PSR-14 event dispatcher to inject into each OPC UA Client.
+     * @param ?ParamDeserializerRegistry $paramRegistry Custom deserializer registry — defaults to one wired with {@see BuiltInParamDeserializer}.
      */
     public function __construct(
         private readonly SessionStore              $store,
@@ -107,10 +106,42 @@ class CommandHandler
         ?LoggerInterface                           $clientLogger = null,
         private readonly ?CacheInterface           $clientCache = null,
         private readonly ?EventDispatcherInterface $clientEventDispatcher = null,
+        ?ParamDeserializerRegistry                 $paramRegistry = null,
     )
     {
         $this->serializer = new TypeSerializer();
         $this->clientLogger = $clientLogger ?? new NullLogger();
+        $this->paramRegistry = $paramRegistry ?? $this->defaultParamRegistry();
+    }
+
+    /**
+     * Build the default {@see ParamDeserializerRegistry} with the single
+     * {@see BuiltInParamDeserializer} that covers every method shipped with
+     * this package. Callers wanting to support custom service methods should
+     * pass a pre-configured registry to the constructor instead of patching
+     * this method.
+     *
+     * @return ParamDeserializerRegistry
+     */
+    private function defaultParamRegistry(): ParamDeserializerRegistry
+    {
+        $registry = new ParamDeserializerRegistry();
+        $registry->register(new BuiltInParamDeserializer($this->serializer));
+
+        return $registry;
+    }
+
+    /**
+     * Add a custom {@see ParamDeserializerInterface} on top of the built-in
+     * registry. Useful for third-party modules that ship service methods with
+     * non-trivial argument encoding needs.
+     *
+     * @param \PhpOpcua\SessionManager\Serialization\ParamDeserializerInterface $deserializer
+     * @return void
+     */
+    public function registerParamDeserializer(\PhpOpcua\SessionManager\Serialization\ParamDeserializerInterface $deserializer): void
+    {
+        $this->paramRegistry->register($deserializer);
     }
 
     /**
@@ -140,6 +171,8 @@ class CommandHandler
                 'open' => $this->handleOpen($command),
                 'close' => $this->handleClose($command),
                 'query' => $this->handleQuery($command),
+                'describe' => $this->handleDescribe($command),
+                'invoke' => $this->handleInvoke($command),
                 'list' => $this->handleList(),
                 'ping' => $this->handlePing(),
                 default => $this->error('unknown_command', "Unknown command: {$type}"),
@@ -157,10 +190,10 @@ class CommandHandler
     private function handleOpen(array $command): array
     {
         $endpointUrl = $command['endpointUrl'] ?? '';
-        $config = $command['config'] ?? [];
         $forceNew = (bool)($command['forceNew'] ?? false);
 
-        $sanitizedConfig = $this->sanitizeConfig($config);
+        $config = SessionConfig::fromArray($command['config'] ?? []);
+        $sanitizedConfig = $config->sanitized()->toArray();
 
         if (!$forceNew) {
             $existing = $this->store->findByEndpointAndConfig($endpointUrl, $sanitizedConfig);
@@ -174,72 +207,9 @@ class CommandHandler
             return $this->error('max_sessions_reached', "Maximum number of sessions ({$this->maxSessions}) reached");
         }
 
-        $this->validateCertPaths($config);
+        $this->validateCertPaths($config->toArray());
 
-        $builder = ClientBuilder::create(logger: $this->clientLogger);
-
-        if ($this->clientEventDispatcher !== null) {
-            $builder->setEventDispatcher($this->clientEventDispatcher);
-        }
-
-        if ($this->clientCache !== null) {
-            $builder->setCache($this->clientCache);
-        }
-
-        if (isset($config['opcuaTimeout'])) {
-            $builder->setTimeout((float)$config['opcuaTimeout']);
-        }
-
-        if (isset($config['autoRetry'])) {
-            $builder->setAutoRetry((int)$config['autoRetry']);
-        }
-
-        if (isset($config['batchSize'])) {
-            $builder->setBatchSize((int)$config['batchSize']);
-        }
-
-        if (isset($config['defaultBrowseMaxDepth'])) {
-            $builder->setDefaultBrowseMaxDepth((int)$config['defaultBrowseMaxDepth']);
-        }
-
-        if (isset($config['securityPolicy'])) {
-            $builder->setSecurityPolicy(SecurityPolicy::from($config['securityPolicy']));
-        }
-        if (isset($config['securityMode'])) {
-            $builder->setSecurityMode(SecurityMode::from((int)$config['securityMode']));
-        }
-        if (isset($config['username'], $config['password'])) {
-            $builder->setUserCredentials($config['username'], $config['password']);
-        }
-        if (isset($config['clientCertPath'], $config['clientKeyPath'])) {
-            $builder->setClientCertificate(
-                $config['clientCertPath'],
-                $config['clientKeyPath'],
-                $config['caCertPath'] ?? null,
-            );
-        }
-        if (isset($config['userCertPath'], $config['userKeyPath'])) {
-            $builder->setUserCertificate($config['userCertPath'], $config['userKeyPath']);
-        }
-
-        if (isset($config['trustStorePath'])) {
-            $builder->setTrustStore(new FileTrustStore($config['trustStorePath']));
-        }
-        if (isset($config['trustPolicy'])) {
-            $builder->setTrustPolicy(TrustPolicy::from($config['trustPolicy']));
-        }
-        if (isset($config['autoAccept'])) {
-            $builder->autoAccept((bool)$config['autoAccept'], (bool)($config['autoAcceptForce'] ?? false));
-        }
-
-        if (isset($config['autoDetectWriteType'])) {
-            $builder->setAutoDetectWriteType((bool)$config['autoDetectWriteType']);
-        }
-        if (isset($config['readMetadataCache'])) {
-            $builder->setReadMetadataCache((bool)$config['readMetadataCache']);
-        }
-
-        $client = $builder->connect($endpointUrl);
+        $client = $this->buildClientFromConfig($endpointUrl, $config);
 
         $sessionId = bin2hex(random_bytes(16));
         $session = new Session(
@@ -252,6 +222,72 @@ class CommandHandler
         $this->store->create($session);
 
         return $this->success(['sessionId' => $sessionId]);
+    }
+
+    /**
+     * Build and connect a {@see \PhpOpcua\Client\Client} from a typed {@see SessionConfig}.
+     * Every non-null field on the DTO maps to a dedicated `ClientBuilder` setter; null
+     * fields leave the builder at its own default.
+     *
+     * @param string $endpointUrl
+     * @param SessionConfig $config
+     * @return \PhpOpcua\Client\Client
+     */
+    private function buildClientFromConfig(string $endpointUrl, SessionConfig $config): \PhpOpcua\Client\Client
+    {
+        $builder = ClientBuilder::create(logger: $this->clientLogger);
+
+        if ($this->clientEventDispatcher !== null) {
+            $builder->setEventDispatcher($this->clientEventDispatcher);
+        }
+        if ($this->clientCache !== null) {
+            $builder->setCache($this->clientCache);
+        }
+
+        if ($config->opcuaTimeout !== null) {
+            $builder->setTimeout($config->opcuaTimeout);
+        }
+        if ($config->autoRetry !== null) {
+            $builder->setAutoRetry($config->autoRetry);
+        }
+        if ($config->batchSize !== null) {
+            $builder->setBatchSize($config->batchSize);
+        }
+        if ($config->defaultBrowseMaxDepth !== null) {
+            $builder->setDefaultBrowseMaxDepth($config->defaultBrowseMaxDepth);
+        }
+        if ($config->securityPolicy !== null) {
+            $builder->setSecurityPolicy(SecurityPolicy::from($config->securityPolicy));
+        }
+        if ($config->securityMode !== null) {
+            $builder->setSecurityMode(SecurityMode::from($config->securityMode));
+        }
+        if ($config->username !== null && $config->password !== null) {
+            $builder->setUserCredentials($config->username, $config->password);
+        }
+        if ($config->clientCertPath !== null && $config->clientKeyPath !== null) {
+            $builder->setClientCertificate($config->clientCertPath, $config->clientKeyPath, $config->caCertPath);
+        }
+        if ($config->userCertPath !== null && $config->userKeyPath !== null) {
+            $builder->setUserCertificate($config->userCertPath, $config->userKeyPath);
+        }
+        if ($config->trustStorePath !== null) {
+            $builder->setTrustStore(new FileTrustStore($config->trustStorePath));
+        }
+        if ($config->trustPolicy !== null) {
+            $builder->setTrustPolicy(TrustPolicy::from($config->trustPolicy));
+        }
+        if ($config->autoAccept !== null) {
+            $builder->autoAccept($config->autoAccept, $config->autoAcceptForce ?? false);
+        }
+        if ($config->autoDetectWriteType !== null) {
+            $builder->setAutoDetectWriteType($config->autoDetectWriteType);
+        }
+        if ($config->readMetadataCache !== null) {
+            $builder->setReadMetadataCache($config->readMetadataCache);
+        }
+
+        return $builder->connect($endpointUrl);
     }
 
     private function handleClose(array $command): array
@@ -529,6 +565,155 @@ class CommandHandler
         ]);
     }
 
+    /**
+     * Expose the method surface of the session's underlying client along with
+     * the module set that defines it and the wire-type FQCNs that may appear on
+     * its arguments or return values.
+     *
+     * The ManagedClient uses this to populate `hasMethod()` / `hasModule()` /
+     * `getRegisteredMethods()` / `getLoadedModules()` and to register the same
+     * {@see WireTypeRegistry} the daemon uses for {@see WireMessageCodec}. The
+     * set of `wireClasses` / `enumClasses` is the authoritative allowlist for
+     * typed values exchanged via the `invoke` command: anything outside this
+     * set is rejected at decode time on both sides.
+     *
+     * @param array<string, mixed> $command
+     * @return array<string, mixed>
+     * @throws SessionNotFoundException
+     */
+    private function handleDescribe(array $command): array
+    {
+        $sessionId = $command['sessionId'] ?? '';
+        $session = $this->store->get($sessionId);
+        $session->touch();
+
+        $registry = $this->buildRegistryForClient($session->client);
+        [$wireClasses, $enumClasses] = $this->splitRegisteredClasses($registry);
+
+        return $this->success([
+            'methods' => $session->client->getRegisteredMethods(),
+            'modules' => $session->client->getLoadedModules(),
+            'wireClasses' => $wireClasses,
+            'enumClasses' => $enumClasses,
+            'wireTypeIds' => $registry->registeredIds(),
+        ]);
+    }
+
+    /**
+     * Generic method-dispatch command. The `args` field is a pre-encoded wire
+     * payload (as produced by {@see WireTypeRegistry::encode()} on the
+     * ManagedClient side); the handler decodes it with the session's mirrored
+     * registry, calls the client method, then returns a wire-encoded result.
+     *
+     * Unlike {@see self::handleQuery()}, this path is NOT gated by
+     * {@see self::ALLOWED_METHODS}: a method is reachable iff
+     * `$session->client->hasMethod($method)` is true, which means the method
+     * is registered by a loaded module. The wire registry then acts as the
+     * type-level allowlist for the payload itself, so arbitrary classes cannot
+     * be instantiated over the wire regardless of the method resolved.
+     *
+     * @param array<string, mixed> $command
+     * @return array<string, mixed>
+     * @throws SessionNotFoundException
+     * @throws Throwable
+     */
+    private function handleInvoke(array $command): array
+    {
+        $sessionId = $command['sessionId'] ?? '';
+        $method = $command['method'] ?? '';
+        $wireArgs = $command['args'] ?? [];
+
+        if (! is_string($method) || $method === '') {
+            return $this->error('invalid_argument', 'invoke: "method" must be a non-empty string.');
+        }
+        if (! is_array($wireArgs)) {
+            return $this->error('invalid_argument', 'invoke: "args" must be an array of wire-encoded values.');
+        }
+
+        $session = $this->store->get($sessionId);
+        $session->touch();
+
+        if (! $session->client->hasMethod($method)) {
+            return $this->error(
+                'unknown_method',
+                sprintf('Method "%s" is not registered on the client for this session.', $method),
+            );
+        }
+
+        $registry = $this->buildRegistryForClient($session->client);
+        $args = array_map(fn ($v) => $registry->decode($v), $wireArgs);
+
+        try {
+            $result = $session->client->{$method}(...$args);
+        } catch (ConnectionException $e) {
+            $recovered = $this->attemptSessionRecovery($session);
+            if (! $recovered) {
+                throw $e;
+            }
+            $result = $session->client->{$method}(...$args);
+        }
+
+        return $this->success(['data' => $registry->encode($result)]);
+    }
+
+    /**
+     * Build a {@see WireTypeRegistry} aligned with the wire types the given
+     * client's loaded modules emit. Re-used by both {@see self::handleDescribe()}
+     * and {@see self::handleInvoke()} so that both sides of a session speak
+     * the same allowlist.
+     *
+     * @param object $client The OPC UA client attached to the session.
+     * @return WireTypeRegistry
+     */
+    private function buildRegistryForClient(object $client): WireTypeRegistry
+    {
+        if (method_exists($client, 'moduleRegistry')) {
+            $registry = $client->moduleRegistry()->buildWireTypeRegistry();
+
+            return $registry;
+        }
+
+        $ref = new \ReflectionClass($client);
+        if ($ref->hasProperty('moduleRegistry')) {
+            $prop = $ref->getProperty('moduleRegistry');
+            $prop->setAccessible(true);
+            /** @var \PhpOpcua\Client\Module\ModuleRegistry $moduleRegistry */
+            $moduleRegistry = $prop->getValue($client);
+
+            return $moduleRegistry->buildWireTypeRegistry();
+        }
+
+        $fallback = new WireTypeRegistry();
+        \PhpOpcua\Client\Wire\CoreWireTypes::register($fallback);
+
+        return $fallback;
+    }
+
+    /**
+     * Flatten a registry's bookkeeping into the two FQCN lists that describe
+     * exposes to the peer: {@see \PhpOpcua\Client\Wire\WireSerializable} classes
+     * vs enum classes.
+     *
+     * @param WireTypeRegistry $registry
+     * @return array{0: string[], 1: string[]} `[wireClasses, enumClasses]`
+     */
+    private function splitRegisteredClasses(WireTypeRegistry $registry): array
+    {
+        $ref = new \ReflectionClass($registry);
+        $wireProp = $ref->getProperty('wireClasses');
+        $wireProp->setAccessible(true);
+        $enumProp = $ref->getProperty('enumClasses');
+        $enumProp->setAccessible(true);
+
+        /** @var array<string, class-string> $wire */
+        $wire = $wireProp->getValue($registry);
+        /** @var array<string, class-string> $enums */
+        $enums = $enumProp->getValue($registry);
+
+        return [array_values($wire), array_values($enums)];
+    }
+
+
     private function sanitizeConfig(array $config): array
     {
         return array_diff_key($config, array_flip(self::SENSITIVE_CONFIG_KEYS));
@@ -598,191 +783,14 @@ class CommandHandler
     }
 
     /**
-     * @param int[] $values
-     * @return NodeClass[]
+     * @param string $method
+     * @param array $params
+     * @return array
+     * @throws InvalidArgumentException If no registered deserializer handles `$method`.
      */
-    private function deserializeNodeClasses(array $values): array
-    {
-        return array_map(fn(int $v) => NodeClass::from($v), $values);
-    }
-
     private function deserializeParams(string $method, array $params): array
     {
-        return match ($method) {
-            'getEndpoints' => [
-                (string)$params[0],
-                (bool)($params[1] ?? true),
-            ],
-            'browse', 'browseAll' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                BrowseDirection::from((int)($params[1] ?? 0)),
-                isset($params[2]) ? $this->serializer->deserializeNodeId($params[2]) : null,
-                (bool)($params[3] ?? true),
-                $this->deserializeNodeClasses($params[4] ?? []),
-                (bool)($params[5] ?? true),
-            ],
-            'browseWithContinuation' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                BrowseDirection::from((int)($params[1] ?? 0)),
-                isset($params[2]) ? $this->serializer->deserializeNodeId($params[2]) : null,
-                (bool)($params[3] ?? true),
-                $this->deserializeNodeClasses($params[4] ?? []),
-            ],
-            'browseRecursive' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                BrowseDirection::from((int)($params[1] ?? 0)),
-                isset($params[2]) ? (int)$params[2] : null,
-                isset($params[3]) ? $this->serializer->deserializeNodeId($params[3]) : null,
-                (bool)($params[4] ?? true),
-                $this->deserializeNodeClasses($params[5] ?? []),
-            ],
-            'browseNext' => [
-                (string)$params[0],
-            ],
-            'translateBrowsePaths' => [
-                array_map(fn(array $bp) => [
-                    'startingNodeId' => $this->serializer->deserializeNodeId($bp['startingNodeId']),
-                    'relativePath' => array_map(fn(array $elem) => [
-                        'referenceTypeId' => isset($elem['referenceTypeId'])
-                            ? $this->serializer->deserializeNodeId($elem['referenceTypeId'])
-                            : null,
-                        'isInverse' => (bool)($elem['isInverse'] ?? false),
-                        'includeSubtypes' => (bool)($elem['includeSubtypes'] ?? true),
-                        'targetName' => $this->serializer->deserializeQualifiedName($elem['targetName']),
-                    ], $bp['relativePath'] ?? []),
-                ], $params[0] ?? []),
-            ],
-            'resolveNodeId' => [
-                (string)$params[0],
-                isset($params[1]) ? $this->serializer->deserializeNodeId($params[1]) : null,
-                (bool)($params[2] ?? true),
-            ],
-            'read' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                (int)($params[1] ?? 13),
-                (bool)($params[2] ?? false),
-            ],
-            'readMulti' => [
-                array_map(fn(array $item) => [
-                    'nodeId' => $this->serializer->deserializeNodeId($item['nodeId']),
-                    'attributeId' => $item['attributeId'] ?? 13,
-                ], $params[0]),
-            ],
-            'write' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                $params[1],
-                isset($params[2]) ? $this->serializer->deserializeBuiltinType((int)$params[2]) : null,
-            ],
-            'writeMulti' => [
-                array_map(fn(array $item) => [
-                    'nodeId' => $this->serializer->deserializeNodeId($item['nodeId']),
-                    'value' => $item['value'],
-                    'type' => isset($item['type']) ? $this->serializer->deserializeBuiltinType((int)$item['type']) : null,
-                    'attributeId' => $item['attributeId'] ?? 13,
-                ], $params[0]),
-            ],
-            'call' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                $this->serializer->deserializeNodeId($params[1]),
-                array_map(fn(array $v) => $this->serializer->deserializeVariant($v), $params[2] ?? []),
-            ],
-            'createSubscription' => [
-                (float)($params[0] ?? 500.0),
-                (int)($params[1] ?? 2400),
-                (int)($params[2] ?? 10),
-                (int)($params[3] ?? 0),
-                (bool)($params[4] ?? true),
-                (int)($params[5] ?? 0),
-            ],
-            'createMonitoredItems' => [
-                (int)$params[0],
-                array_map(fn(array $item) => [
-                    'nodeId' => $this->serializer->deserializeNodeId($item['nodeId']),
-                    'attributeId' => $item['attributeId'] ?? 13,
-                    'samplingInterval' => $item['samplingInterval'] ?? 250.0,
-                    'queueSize' => $item['queueSize'] ?? 1,
-                    'clientHandle' => $item['clientHandle'] ?? 0,
-                    'monitoringMode' => $item['monitoringMode'] ?? 0,
-                ], $params[1]),
-            ],
-            'createEventMonitoredItem' => [
-                (int)$params[0],
-                $this->serializer->deserializeNodeId($params[1]),
-                $params[2] ?? ['EventId', 'EventType', 'SourceName', 'Time', 'Message', 'Severity'],
-                (int)($params[3] ?? 1),
-            ],
-            'deleteMonitoredItems' => [
-                (int)$params[0],
-                array_map('intval', $params[1]),
-            ],
-            'deleteSubscription' => [
-                (int)$params[0],
-            ],
-            'publish' => [
-                $params[0] ?? [],
-            ],
-            'transferSubscriptions' => [
-                array_map('intval', $params[0] ?? []),
-                (bool)($params[1] ?? false),
-            ],
-            'republish' => [
-                (int)$params[0],
-                (int)$params[1],
-            ],
-            'historyReadRaw' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                isset($params[1]) ? new DateTimeImmutable($params[1]) : null,
-                isset($params[2]) ? new DateTimeImmutable($params[2]) : null,
-                (int)($params[3] ?? 0),
-                (bool)($params[4] ?? false),
-            ],
-            'historyReadProcessed' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                new DateTimeImmutable($params[1]),
-                new DateTimeImmutable($params[2]),
-                (float)$params[3],
-                $this->serializer->deserializeNodeId($params[4]),
-            ],
-            'historyReadAtTime' => [
-                $this->serializer->deserializeNodeId($params[0]),
-                array_map(fn(string $ts) => new DateTimeImmutable($ts), $params[1]),
-            ],
-            'discoverDataTypes' => [
-                isset($params[0]) ? (int)$params[0] : null,
-                (bool)($params[1] ?? true),
-            ],
-            'invalidateCache' => [
-                $this->serializer->deserializeNodeId($params[0]),
-            ],
-            'modifyMonitoredItems' => [
-                (int)$params[0],
-                array_map(fn(array $item) => [
-                    'monitoredItemId' => (int)$item['monitoredItemId'],
-                    'samplingInterval' => isset($item['samplingInterval']) ? (float)$item['samplingInterval'] : null,
-                    'queueSize' => isset($item['queueSize']) ? (int)$item['queueSize'] : null,
-                    'clientHandle' => isset($item['clientHandle']) ? (int)$item['clientHandle'] : null,
-                    'discardOldest' => isset($item['discardOldest']) ? (bool)$item['discardOldest'] : null,
-                ], $params[1]),
-            ],
-            'setTriggering' => [
-                (int)$params[0],
-                (int)$params[1],
-                array_map('intval', $params[2] ?? []),
-                array_map('intval', $params[3] ?? []),
-            ],
-            'trustCertificate' => [
-                (string)$params[0],
-            ],
-            'untrustCertificate' => [
-                (string)$params[0],
-            ],
-            'isConnected', 'getConnectionState', 'reconnect',
-            'getTimeout', 'getAutoRetry', 'getBatchSize',
-            'getDefaultBrowseMaxDepth', 'getServerMaxNodesPerRead',
-            'getServerMaxNodesPerWrite', 'flushCache',
-            'getTrustStore', 'getTrustPolicy', 'getEventDispatcher', 'getLogger' => [],
-            default => throw new InvalidArgumentException("Unsupported method: {$method}"),
-        };
+        return $this->paramRegistry->deserialize($method, $params);
     }
 
     private function success(mixed $data): array

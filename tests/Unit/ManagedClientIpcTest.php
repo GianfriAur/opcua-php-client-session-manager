@@ -5,18 +5,18 @@ declare(strict_types=1);
 use PhpOpcua\Client\Exception\ConnectionException;
 use PhpOpcua\Client\Exception\ServiceException;
 use PhpOpcua\Client\Types\BrowseDirection;
-use PhpOpcua\Client\Types\BrowsePathResult;
-use PhpOpcua\Client\Types\BrowseResultSet;
+use PhpOpcua\Client\Module\TranslateBrowsePath\BrowsePathResult;
+use PhpOpcua\Client\Module\Browse\BrowseResultSet;
 use PhpOpcua\Client\Types\BuiltinType;
-use PhpOpcua\Client\Types\CallResult;
+use PhpOpcua\Client\Module\ReadWrite\CallResult;
 use PhpOpcua\Client\Types\DataValue;
 use PhpOpcua\Client\Types\EndpointDescription;
-use PhpOpcua\Client\Types\MonitoredItemResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemResult;
 use PhpOpcua\Client\Types\NodeClass;
 use PhpOpcua\Client\Types\NodeId;
-use PhpOpcua\Client\Types\PublishResult;
-use PhpOpcua\Client\Types\SubscriptionResult;
-use PhpOpcua\Client\Types\TransferResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\TransferResult;
 use PhpOpcua\SessionManager\Client\ManagedClient;
 use PhpOpcua\SessionManager\Exception\DaemonException;
 
@@ -605,4 +605,4 @@ describe('ManagedClient IPC', function () {
 
     });
 
-});
+})->skipOnWindows();

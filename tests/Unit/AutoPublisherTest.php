@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use PhpOpcua\Client\Client;
 use PhpOpcua\Client\Exception\ConnectionException;
-use PhpOpcua\Client\Types\PublishResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
 use PhpOpcua\SessionManager\Daemon\AutoPublisher;
 use PhpOpcua\SessionManager\Daemon\Session;
 use PhpOpcua\SessionManager\Daemon\SessionStore;

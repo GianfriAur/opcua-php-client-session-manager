@@ -3,14 +3,14 @@
 declare(strict_types=1);
 
 use PhpOpcua\Client\Client;
-use PhpOpcua\Client\Types\BrowseResultSet;
+use PhpOpcua\Client\Module\Browse\BrowseResultSet;
 use PhpOpcua\Client\Types\BuiltinType;
 use PhpOpcua\Client\Types\DataValue;
 use PhpOpcua\Client\Types\EndpointDescription;
-use PhpOpcua\Client\Types\MonitoredItemResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemResult;
 use PhpOpcua\Client\Types\NodeId;
-use PhpOpcua\Client\Types\PublishResult;
-use PhpOpcua\Client\Types\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
 use PhpOpcua\Client\Types\Variant;
 use PhpOpcua\SessionManager\Daemon\CommandHandler;
 use PhpOpcua\SessionManager\Daemon\Session;

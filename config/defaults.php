@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use PhpOpcua\SessionManager\Ipc\TransportFactory;
+
 return [
-    'socket_path' => '/tmp/opcua-session-manager.sock',
+    'socket_path' => TransportFactory::defaultEndpoint(),
     'timeout' => 600,
     'cleanup_interval' => 30,
     'auth_token' => null,

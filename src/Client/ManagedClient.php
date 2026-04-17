@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace PhpOpcua\SessionManager\Client;
 
+use BadMethodCallException;
 use DateTimeImmutable;
 use PhpOpcua\Client\Builder\BrowsePathsBuilder;
 use PhpOpcua\Client\Builder\MonitoredItemsBuilder;
@@ -20,24 +21,31 @@ use PhpOpcua\Client\TrustStore\TrustPolicy;
 use PhpOpcua\Client\TrustStore\TrustStoreInterface;
 use PhpOpcua\Client\Types\BrowseDirection;
 use PhpOpcua\Client\Types\BrowseNode;
-use PhpOpcua\Client\Types\BrowsePathResult;
-use PhpOpcua\Client\Types\BrowseResultSet;
+use PhpOpcua\Client\Module\TranslateBrowsePath\BrowsePathResult;
+use PhpOpcua\Client\Module\Browse\BrowseResultSet;
 use PhpOpcua\Client\Types\BuiltinType;
-use PhpOpcua\Client\Types\CallResult;
+use PhpOpcua\Client\Module\NodeManagement\AddNodesResult;
+use PhpOpcua\Client\Module\ReadWrite\CallResult;
+use PhpOpcua\Client\Module\ServerInfo\BuildInfo;
+use PhpOpcua\Client\Types\AttributeId;
 use PhpOpcua\Client\Types\ConnectionState;
 use PhpOpcua\Client\Types\DataValue;
 use PhpOpcua\Client\Types\EndpointDescription;
-use PhpOpcua\Client\Types\MonitoredItemModifyResult;
-use PhpOpcua\Client\Types\MonitoredItemResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemModifyResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemResult;
 use PhpOpcua\Client\Types\NodeClass;
 use PhpOpcua\Client\Types\NodeId;
-use PhpOpcua\Client\Types\PublishResult;
-use PhpOpcua\Client\Types\SetTriggeringResult;
-use PhpOpcua\Client\Types\SubscriptionResult;
-use PhpOpcua\Client\Types\TransferResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
+use PhpOpcua\Client\Module\Subscription\SetTriggeringResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\TransferResult;
 use PhpOpcua\Client\Types\Variant;
+use PhpOpcua\Client\Wire\WireTypeRegistry;
 use PhpOpcua\SessionManager\Exception\DaemonException;
+use PhpOpcua\SessionManager\Ipc\WireMessageCodec;
 use PhpOpcua\SessionManager\Serialization\TypeSerializer;
+use UnitEnum;
+use PhpOpcua\Client\Wire\WireSerializable;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -55,6 +63,25 @@ class ManagedClient implements OpcUaClientInterface
     private bool $sessionReused = false;
     private array $config = [];
     private TypeSerializer $serializer;
+
+    /**
+     * Cached result of the remote `describe` IPC command. Populated lazily on
+     * first call to {@see self::getRegisteredMethods()}, {@see self::hasMethod()},
+     * {@see self::hasModule()}, or any third-party method routed through
+     * {@see self::__call()}. Invalidated when the session closes.
+     *
+     * Shape: `{methods: string[], modules: class-string[], wireClasses: class-string[], enumClasses: class-string[]}`.
+     *
+     * @var ?array{methods: string[], modules: array<class-string>, wireClasses: array<class-string>, enumClasses: array<class-string>}
+     */
+    private ?array $describe = null;
+
+    /**
+     * Codec + registry built from the describe response, so that typed values
+     * sent over `invoke` are encoded with the exact same type allowlist the
+     * daemon applies on decode. Kept in sync with {@see self::$describe}.
+     */
+    private ?WireMessageCodec $wireCodec = null;
 
     private float $opcuaTimeout = 5.0;
     private ?int $autoRetry = null;
@@ -534,6 +561,8 @@ class ManagedClient implements OpcUaClientInterface
             ]);
         } finally {
             $this->sessionId = null;
+            $this->describe = null;
+            $this->wireCodec = null;
         }
     }
 
@@ -1346,5 +1375,400 @@ class ManagedClient implements OpcUaClientInterface
         }
 
         return $response['data'];
+    }
+
+    /**
+     * @return ?string Server ProductName (`ns=0;i=2262`), or null if the server does not expose it.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerProductName(): ?string
+    {
+        $value = $this->read(NodeId::numeric(0, 2262), AttributeId::Value)->getValue();
+
+        return is_string($value) ? $value : null;
+    }
+
+    /**
+     * @return ?string Server ManufacturerName (`ns=0;i=2263`), or null if the server does not expose it.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerManufacturerName(): ?string
+    {
+        $value = $this->read(NodeId::numeric(0, 2263), AttributeId::Value)->getValue();
+
+        return is_string($value) ? $value : null;
+    }
+
+    /**
+     * @return ?string Server SoftwareVersion (`ns=0;i=2264`), or null if the server does not expose it.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerSoftwareVersion(): ?string
+    {
+        $value = $this->read(NodeId::numeric(0, 2264), AttributeId::Value)->getValue();
+
+        return is_string($value) ? $value : null;
+    }
+
+    /**
+     * @return ?string Server BuildNumber (`ns=0;i=2265`), or null if the server does not expose it.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerBuildNumber(): ?string
+    {
+        $value = $this->read(NodeId::numeric(0, 2265), AttributeId::Value)->getValue();
+
+        return is_string($value) ? $value : null;
+    }
+
+    /**
+     * @return ?DateTimeImmutable Server BuildDate (`ns=0;i=2266`), or null if the server does not expose it.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerBuildDate(): ?DateTimeImmutable
+    {
+        $value = $this->read(NodeId::numeric(0, 2266), AttributeId::Value)->getValue();
+
+        return $value instanceof DateTimeImmutable ? $value : null;
+    }
+
+    /**
+     * Fetch the full BuildInfo structure in a single `readMulti()` IPC round-trip.
+     *
+     * @return BuildInfo Populated with whichever of the 5 BuildInfo fields the server exposes;
+     *                   missing or typo-typed fields are left as `null` on the DTO.
+     *
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function getServerBuildInfo(): BuildInfo
+    {
+        $results = $this->readMulti([
+            ['nodeId' => NodeId::numeric(0, 2262)],
+            ['nodeId' => NodeId::numeric(0, 2263)],
+            ['nodeId' => NodeId::numeric(0, 2264)],
+            ['nodeId' => NodeId::numeric(0, 2265)],
+            ['nodeId' => NodeId::numeric(0, 2266)],
+        ]);
+
+        $productName = $results[0]->getValue();
+        $manufacturerName = $results[1]->getValue();
+        $softwareVersion = $results[2]->getValue();
+        $buildNumber = $results[3]->getValue();
+        $buildDate = $results[4]->getValue();
+
+        return new BuildInfo(
+            productName: is_string($productName) ? $productName : null,
+            manufacturerName: is_string($manufacturerName) ? $manufacturerName : null,
+            softwareVersion: is_string($softwareVersion) ? $softwareVersion : null,
+            buildNumber: is_string($buildNumber) ? $buildNumber : null,
+            buildDate: $buildDate instanceof DateTimeImmutable ? $buildDate : null,
+        );
+    }
+
+    /**
+     * Add nodes to the server's address space. Delegated to the daemon via the
+     * generic `invoke` IPC path — functional only when the daemon's underlying
+     * client has the `NodeManagementModule` loaded (opt-in in opcua-client
+     * v4.2.0).
+     *
+     * @param array $nodesToAdd
+     * @return AddNodesResult[]
+     *
+     * @throws BadMethodCallException If the daemon's client does not have `addNodes` registered.
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function addNodes(array $nodesToAdd): array
+    {
+        /** @var AddNodesResult[] $result */
+        $result = $this->invokeRemote('addNodes', [$nodesToAdd]);
+
+        return $result;
+    }
+
+    /**
+     * Delete nodes. Delegated via `invoke`. See {@see self::addNodes()}.
+     *
+     * @param array $nodesToDelete
+     * @return int[]
+     *
+     * @throws BadMethodCallException
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function deleteNodes(array $nodesToDelete): array
+    {
+        /** @var int[] $result */
+        $result = $this->invokeRemote('deleteNodes', [$nodesToDelete]);
+
+        return $result;
+    }
+
+    /**
+     * Add references between nodes. Delegated via `invoke`.
+     *
+     * @param array $referencesToAdd
+     * @return int[]
+     *
+     * @throws BadMethodCallException
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function addReferences(array $referencesToAdd): array
+    {
+        /** @var int[] $result */
+        $result = $this->invokeRemote('addReferences', [$referencesToAdd]);
+
+        return $result;
+    }
+
+    /**
+     * Delete references. Delegated via `invoke`.
+     *
+     * @param array $referencesToDelete
+     * @return int[]
+     *
+     * @throws BadMethodCallException
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function deleteReferences(array $referencesToDelete): array
+    {
+        /** @var int[] $result */
+        $result = $this->invokeRemote('deleteReferences', [$referencesToDelete]);
+
+        return $result;
+    }
+
+    /**
+     * Check whether a method of the given name is reachable on this client.
+     *
+     * Answers truthfully for any method registered on the daemon's underlying
+     * `PhpOpcua\Client\Client` — including method names contributed by third-
+     * party modules the daemon has loaded via `ClientBuilder::addModule()`.
+     * The list is fetched lazily the first time the client queries it and
+     * cached until {@see self::disconnect()}.
+     *
+     * @param string $name The method name to probe.
+     * @return bool
+     */
+    public function hasMethod(string $name): bool
+    {
+        if ($this->sessionId === null) {
+            return method_exists($this, $name);
+        }
+        try {
+            return in_array($name, $this->ensureDescribe()['methods'], true);
+        } catch (DaemonException|ConnectionException) {
+            return method_exists($this, $name);
+        }
+    }
+
+    /**
+     * Check whether a module of the given fully-qualified class name is loaded
+     * on the daemon's underlying client.
+     *
+     * Resolved through the same `describe` round-trip used by {@see self::hasMethod()};
+     * no hardcoded module list — the truth of record is the daemon's
+     * `moduleRegistry->getModuleClasses()`.
+     *
+     * @param string $moduleClass Fully-qualified module class name.
+     * @return bool
+     */
+    public function hasModule(string $moduleClass): bool
+    {
+        if ($this->sessionId === null) {
+            return false;
+        }
+        try {
+            return in_array($moduleClass, $this->ensureDescribe()['modules'], true);
+        } catch (DaemonException|ConnectionException) {
+            return false;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @throws DaemonException
+     * @throws ConnectionException
+     */
+    public function getRegisteredMethods(): array
+    {
+        if ($this->sessionId === null) {
+            $names = [];
+            foreach ((new \ReflectionClass(OpcUaClientInterface::class))->getMethods() as $m) {
+                $names[] = $m->getName();
+            }
+
+            return array_values(array_unique($names));
+        }
+
+        return $this->ensureDescribe()['methods'];
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @throws DaemonException
+     * @throws ConnectionException
+     */
+    public function getLoadedModules(): array
+    {
+        if ($this->sessionId === null) {
+            return [];
+        }
+
+        return $this->ensureDescribe()['modules'];
+    }
+
+    /**
+     * Proxy any method name that is registered on the daemon's client but is
+     * not declared as a concrete method on {@see ManagedClient}. Covers third-
+     * party modules transparently: if the daemon loaded a custom
+     * `AcmeModule::queryFirst(...)`, the caller can do `$managed->queryFirst(...)`
+     * and the args / return value flow through {@see WireMessageCodec}.
+     *
+     * @param string $method
+     * @param array<int, mixed> $args
+     * @return mixed
+     *
+     * @throws BadMethodCallException If the daemon has no such method.
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    public function __call(string $method, array $args): mixed
+    {
+        return $this->invokeRemote($method, $args);
+    }
+
+    /**
+     * Fetch (and cache) the remote `describe` metadata, invalidated on disconnect.
+     *
+     * @return array{methods: string[], modules: array<class-string>, wireClasses: array<class-string>, enumClasses: array<class-string>}
+     * @throws DaemonException
+     * @throws ConnectionException
+     */
+    private function ensureDescribe(): array
+    {
+        if ($this->describe !== null) {
+            return $this->describe;
+        }
+        if ($this->sessionId === null) {
+            throw new ConnectionException('Not connected. Call connect() first.');
+        }
+
+        $data = $this->sendCommand([
+            'command' => 'describe',
+            'sessionId' => $this->sessionId,
+        ]);
+
+        if (! is_array($data)
+            || ! isset($data['methods'], $data['modules'], $data['wireClasses'], $data['enumClasses'])
+            || ! is_array($data['methods']) || ! is_array($data['modules'])
+            || ! is_array($data['wireClasses']) || ! is_array($data['enumClasses'])
+        ) {
+            throw new DaemonException('Malformed describe response: missing or non-array fields.');
+        }
+
+        $this->describe = [
+            'methods' => array_values($data['methods']),
+            'modules' => array_values($data['modules']),
+            'wireClasses' => array_values($data['wireClasses']),
+            'enumClasses' => array_values($data['enumClasses']),
+        ];
+        $this->wireCodec = $this->buildCodecFromDescribe($this->describe);
+
+        return $this->describe;
+    }
+
+    /**
+     * Build a codec whose registry mirrors the daemon's type allowlist.
+     * Classes not loadable on this side are skipped — decode fails loudly later if needed.
+     *
+     * @param array{wireClasses: array<class-string>, enumClasses: array<class-string>} $describe
+     * @return WireMessageCodec
+     */
+    private function buildCodecFromDescribe(array $describe): WireMessageCodec
+    {
+        $registry = new WireTypeRegistry();
+        foreach ($describe['wireClasses'] as $class) {
+            if (class_exists($class) && is_subclass_of($class, WireSerializable::class)) {
+                $registry->register($class);
+            }
+        }
+        foreach ($describe['enumClasses'] as $class) {
+            if (class_exists($class) && is_subclass_of($class, UnitEnum::class)) {
+                $registry->registerEnum($class);
+            }
+        }
+
+        return new WireMessageCodec($registry);
+    }
+
+    /**
+     * Send an `invoke` request for `$method` with positional `$args`.
+     *
+     * @param string $method Target method name on the daemon's client.
+     * @param array<int, mixed> $args
+     * @return mixed The wire-decoded return value.
+     * @throws BadMethodCallException If the daemon's client does not expose `$method`.
+     * @throws ConnectionException
+     * @throws ServiceException
+     * @throws DaemonException
+     */
+    private function invokeRemote(string $method, array $args): mixed
+    {
+        $describe = $this->ensureDescribe();
+        if (! in_array($method, $describe['methods'], true)) {
+            throw new BadMethodCallException(sprintf(
+                'Method "%s" is not available on the session-manager daemon (describe reported %d method(s)). '
+                . 'If a third-party module adds this method, make sure the module is loaded on the daemon side.',
+                $method,
+                count($describe['methods']),
+            ));
+        }
+
+        $codec = $this->wireCodec;
+        if ($codec === null) {
+            throw new DaemonException('invoke: wire codec is not initialised (describe returned but codec missing).');
+        }
+
+        $wireArgs = array_map(fn ($v) => $codec->registry()->encode($v), $args);
+
+        $data = $this->sendCommand([
+            'command' => 'invoke',
+            'sessionId' => $this->sessionId,
+            'method' => $method,
+            'args' => $wireArgs,
+        ]);
+
+        if (! is_array($data) || ! array_key_exists('data', $data)) {
+            throw new DaemonException('Malformed invoke response: missing "data" field.');
+        }
+
+        return $codec->registry()->decode($data['data']);
     }
 }

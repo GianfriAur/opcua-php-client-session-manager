@@ -80,11 +80,11 @@ describe('SocketConnection', function () {
 
         try {
             expect(fn() => SocketConnection::send($tmpFile, ['command' => 'ping'], 1.0))
-                ->toThrow(DaemonException::class, 'Cannot connect to daemon');
+                ->toThrow(DaemonException::class, 'Cannot connect to Unix socket');
         } finally {
             unlink($tmpFile);
         }
-    });
+    })->skipOnWindows();
 
     it('throws on empty response when server closes without responding', function () {
         $server = createFakeServer(respond: false);
@@ -95,18 +95,18 @@ describe('SocketConnection', function () {
         } finally {
             cleanupFakeServer($server);
         }
-    });
+    })->skipOnWindows();
 
     it('throws on timeout when server holds connection open without responding', function () {
         $server = createFakeServer(respond: false, delayMs: 3000);
 
         try {
             expect(fn() => SocketConnection::send($server['socketPath'], ['command' => 'ping'], 1.0))
-                ->toThrow(DaemonException::class, 'Daemon request timed out');
+                ->toThrow(DaemonException::class, 'Read timeout');
         } finally {
             cleanupFakeServer($server);
         }
-    });
+    })->skipOnWindows();
 
     it('throws on invalid JSON response', function () {
         $server = createFakeServer(respond: true, response: 'not-json{{{');
@@ -117,7 +117,7 @@ describe('SocketConnection', function () {
         } finally {
             cleanupFakeServer($server);
         }
-    });
+    })->skipOnWindows();
 
     it('throws on non-array JSON response', function () {
         $server = createFakeServer(respond: true, response: '"just a string"');
@@ -128,7 +128,7 @@ describe('SocketConnection', function () {
         } finally {
             cleanupFakeServer($server);
         }
-    });
+    })->skipOnWindows();
 
     it('returns decoded array on valid JSON response', function () {
         $server = createFakeServer(respond: true, response: json_encode(['success' => true, 'data' => 'ok']));
@@ -139,7 +139,7 @@ describe('SocketConnection', function () {
         } finally {
             cleanupFakeServer($server);
         }
-    });
+    })->skipOnWindows();
 
     it('sends JSON payload with newline delimiter', function () {
         $server = createFakeServer(respond: true, response: json_encode(['success' => true, 'data' => null]));
@@ -150,30 +150,16 @@ describe('SocketConnection', function () {
         } finally {
             cleanupFakeServer($server);
         }
+    })->skipOnWindows();
+
+    it('routes a tcp:// endpoint through TcpLoopbackTransport (refuses non-loopback)', function () {
+        expect(fn () => SocketConnection::send('tcp://192.168.1.1:9990', ['command' => 'ping'], 0.5))
+            ->toThrow(DaemonException::class, 'refuses to bind to non-loopback');
     });
 
-    it('closeAndThrowIf closes socket and throws when condition is true', function () {
-        $method = new ReflectionMethod(SocketConnection::class, 'closeAndThrowIf');
-        $method->setAccessible(true);
-
-        $stream = fopen('php://memory', 'r+');
-
-        expect(function () use ($method, $stream) {
-            $method->invoke(null, $stream, true, 'Write failed');
-        })->toThrow(DaemonException::class, 'Write failed');
-
-        expect(is_resource($stream))->toBeFalse();
-    });
-
-    it('closeAndThrowIf does nothing when condition is false', function () {
-        $method = new ReflectionMethod(SocketConnection::class, 'closeAndThrowIf');
-        $method->setAccessible(true);
-
-        $stream = fopen('php://memory', 'r+');
-        $method->invoke(null, $stream, false, 'Write failed');
-
-        expect(is_resource($stream))->toBeTrue();
-        fclose($stream);
+    it('rejects an unsupported URI scheme', function () {
+        expect(fn () => SocketConnection::send('http://localhost/endpoint', ['command' => 'ping']))
+            ->toThrow(DaemonException::class, 'Unsupported transport scheme');
     });
 
 });

@@ -67,7 +67,7 @@ for ($i = 0; $i < count($args); $i++) {
             echo "Usage: opcua-session-manager [options]\n";
             echo "\n";
             echo "Options:\n";
-            echo "  --socket <path>              Unix socket path (default: /tmp/opcua-session-manager.sock)\n";
+            echo "  --socket <uri>               IPC endpoint URI. Accepts unix://<path>, tcp://127.0.0.1:<port>, or a plain path (= unix://<path>). Default per OS: unix:///tmp/opcua-session-manager.sock on Linux/macOS, tcp://127.0.0.1:9990 on Windows.\n";
             echo "  --timeout <seconds>          Session timeout in seconds (default: 600)\n";
             echo "  --cleanup-interval <seconds>  Cleanup interval in seconds (default: 30)\n";
             echo "  --auth-token <token>         Shared secret for IPC authentication (prefer env var or file)\n";

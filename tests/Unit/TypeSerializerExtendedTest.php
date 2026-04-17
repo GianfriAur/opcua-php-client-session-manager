@@ -3,21 +3,21 @@
 declare(strict_types=1);
 
 use PhpOpcua\Client\Types\BrowseDirection;
-use PhpOpcua\Client\Types\BrowsePathResult;
-use PhpOpcua\Client\Types\BrowsePathTarget;
+use PhpOpcua\Client\Module\TranslateBrowsePath\BrowsePathResult;
+use PhpOpcua\Client\Module\TranslateBrowsePath\BrowsePathTarget;
 use PhpOpcua\Client\Types\BuiltinType;
 use PhpOpcua\Client\Types\ConnectionState;
 use PhpOpcua\Client\Types\DataValue;
 use PhpOpcua\Client\Types\EndpointDescription;
 use PhpOpcua\Client\Types\LocalizedText;
-use PhpOpcua\Client\Types\MonitoredItemResult;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemResult;
 use PhpOpcua\Client\Types\NodeClass;
 use PhpOpcua\Client\Types\NodeId;
-use PhpOpcua\Client\Types\PublishResult;
+use PhpOpcua\Client\Module\Subscription\PublishResult;
 use PhpOpcua\Client\Types\QualifiedName;
 use PhpOpcua\Client\Types\ReferenceDescription;
-use PhpOpcua\Client\Types\SubscriptionResult;
-use PhpOpcua\Client\Types\TransferResult;
+use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
+use PhpOpcua\Client\Module\Subscription\TransferResult;
 use PhpOpcua\Client\Types\UserTokenPolicy;
 use PhpOpcua\Client\Types\Variant;
 use PhpOpcua\SessionManager\Exception\SerializationException;
@@ -62,14 +62,14 @@ describe('TypeSerializer — Extended', function () {
         });
 
         it('serializes CallResult via generic serialize', function () {
-            $result = new \PhpOpcua\Client\Types\CallResult(0, [], []);
+            $result = new \PhpOpcua\Client\Module\ReadWrite\CallResult(0, [], []);
             $serialized = $this->serializer->serialize($result);
 
             expect($serialized['statusCode'])->toBe(0);
         });
 
         it('serializes BrowseResultSet via generic serialize', function () {
-            $result = new \PhpOpcua\Client\Types\BrowseResultSet([], null);
+            $result = new \PhpOpcua\Client\Module\Browse\BrowseResultSet([], null);
             $serialized = $this->serializer->serialize($result);
 
             expect($serialized['references'])->toBe([]);

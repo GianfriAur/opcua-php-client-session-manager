@@ -16,11 +16,17 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/php-opcua/opcua-session-manager?style=flat-square" alt="License"></a>
 </p>
 
+<p align="center">
+  <img src="https://custom-icon-badges.demolab.com/badge/Linux-✓-2ea44f?style=flat-square&logo=linux&logoColor=white" alt="Linux">
+  <img src="https://custom-icon-badges.demolab.com/badge/macOS-✓-2ea44f?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+  <img src="https://custom-icon-badges.demolab.com/badge/Windows-✓-2ea44f?style=flat-square&logo=windows11&logoColor=white" alt="Windows">
+</p>
+
 ---
 
 Keep OPC UA sessions alive across PHP requests. A daemon-based session manager for [`opcua-client`](https://github.com/php-opcua/opcua-client) that eliminates the 50–200ms connection handshake overhead on every HTTP request.
 
-PHP's request/response model destroys all state — including network connections — at the end of every request. OPC UA requires a 5-step handshake (TCP → Hello/Ack → OpenSecureChannel → CreateSession → ActivateSession) that must be repeated every single time. This package solves the problem with a long-running [ReactPHP](https://reactphp.org/) daemon that holds sessions in memory, communicating with PHP applications via a lightweight Unix socket IPC protocol.
+PHP's request/response model destroys all state — including network connections — at the end of every request. OPC UA requires a 5-step handshake (TCP → Hello/Ack → OpenSecureChannel → CreateSession → ActivateSession) that must be repeated every single time. This package solves the problem with a long-running [ReactPHP](https://reactphp.org/) daemon that holds sessions in memory, communicating with PHP applications via a lightweight local IPC protocol (Unix-domain socket on Linux/macOS, TCP loopback on Windows — auto-selected).
 
 **What you get:**
 
@@ -34,8 +40,6 @@ PHP's request/response model destroys all state — including network connection
 - **Automatic cleanup** — expired sessions are disconnected after configurable inactivity timeout
 - **Graceful shutdown** — SIGTERM/SIGINT cleanly disconnect all active sessions
 
-> **A note on versioning:** We're aware of the rapid major releases in a short time frame. This library is under active, full-time development right now — the goal is to reach a production-stable state as quickly as possible. Breaking changes are being bundled and shipped deliberately to avoid dragging them out across many minor releases. Once the API surface settles, major version bumps will become rare. Thanks for your patience.
-
 <table>
 <tr>
 <td>
@@ -44,7 +48,34 @@ PHP's request/response model destroys all state — including network connection
 
 The underlying [opcua-client](https://github.com/php-opcua/opcua-client) is integration-tested against **[UA-.NETStandard](https://github.com/OPCFoundation/UA-.NETStandard)** — the **reference implementation** maintained by the OPC Foundation, the organization that defines the OPC UA specification. This is the same stack used by major industrial vendors to certify their products.
 
-This session manager is additionally integration-tested via [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite), verifying that all OPC UA operations work correctly when proxied through the daemon's IPC layer.
+This session manager is additionally integration-tested via [uanetstandard-test-suite](https://github.com/php-opcua/uanetstandard-test-suite), verifying that all OPC UA operations work correctly when proxied through the daemon's IPC layer. Like [opcua-client](https://github.com/php-opcua/opcua-client), unit tests run cross-OS — **Linux, macOS, and Windows** across PHP 8.2–8.5 — on every push. Integration tests stay on Linux (Docker-hosted OPC UA servers).
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td>
+
+### Runs on Linux, macOS, and Windows
+
+The daemon and `ManagedClient` pick the right local IPC transport automatically — no platform-specific code in your application.
+
+| Platform | Default transport | Endpoint URI |
+|---|---|---|
+| Linux / macOS | Unix-domain socket | `unix:///tmp/opcua-session-manager.sock` |
+| Windows | TCP loopback | `tcp://127.0.0.1:9990` |
+
+`PhpOpcua\SessionManager\Ipc\TransportFactory::defaultEndpoint()` reads `PHP_OS_FAMILY` at startup and returns the platform-appropriate URI; both sides agree without any config. You can override explicitly with `--socket tcp://127.0.0.1:8900` on the daemon or by passing the same URI to `new ManagedClient(...)`.
+
+**Security posture is identical on every OS:**
+
+- **Local origin only.** On Linux/macOS the Unix socket relies on filesystem permissions (`0600` by default). On Windows the TCP path is **loopback-only, enforced on both sides**: `TcpLoopbackTransport` (client) and `SessionManagerDaemon` (daemon) both refuse any bind/connect to a non-loopback host at construction time.
+- **Authenticated every request.** The shared `authToken` is compared with `hash_equals()` on every IPC frame, regardless of transport.
+- **Same wire format.** NDJSON-framed JSON, 16 MiB frame cap, 32-level JSON nesting cap, binary-mode streams (no `\n` ↔ `\r\n` translation on Windows).
+
+Named pipes on Windows were evaluated and intentionally skipped — see the [ROADMAP](ROADMAP.md#windows-native-named-pipe-transport) for the full cost/benefit analysis.
 
 </td>
 </tr>
@@ -267,6 +298,8 @@ Request N:                       [read 5ms]           → total ~5ms
 | **PSR-3 Logging** | Optional structured logging via any PSR-3 logger |
 | **PSR-16 Cache** | Cache management forwarded to daemon — `invalidateCache()`, `flushCache()` |
 | **Security** | 10 policies (RSA + ECC), 3 auth modes, IPC authentication, method whitelist |
+| **Third-party modules** | Any method registered by a custom `ServiceModule` on the daemon is callable via `ManagedClient::$method(...)` — typed args/results travel through a JSON wire codec with an explicit type allowlist |
+| **Cross-platform IPC** | Auto-selects Unix-domain sockets on Linux/macOS and TCP loopback on Windows via `TransportFactory`. Endpoints accept `unix://<path>`, `tcp://127.0.0.1:<port>`, or a scheme-less Unix path (backwards-compatible). Loopback-only guard on both client and daemon sides |
 | **Auto-Retry** | Automatic reconnect on connection failures |
 | **Auto-Batching** | Transparent batching for `readMulti()`/`writeMulti()` |
 | **Auto-Publish** | Daemon automatically calls `publish()` for sessions with subscriptions and dispatches PSR-14 events |
@@ -282,13 +315,13 @@ php bin/opcua-session-manager [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--socket <path>` | `/tmp/opcua-session-manager.sock` | Unix socket path |
+| `--socket <uri>` | per-OS (`unix:///tmp/opcua-session-manager.sock` on Linux/macOS, `tcp://127.0.0.1:9990` on Windows) | IPC endpoint URI. Accepts `unix://<path>`, `tcp://127.0.0.1:<port>`, or a scheme-less Unix path. TCP binds are loopback-only (construction-time guard refuses non-loopback hosts). |
 | `--timeout <sec>` | `600` | Session inactivity timeout |
 | `--cleanup-interval <sec>` | `30` | Expired session cleanup interval |
 | `--auth-token <token>` | *(none)* | Shared secret for IPC authentication |
 | `--auth-token-file <path>` | *(none)* | Read auth token from file (recommended) |
 | `--max-sessions <n>` | `100` | Maximum concurrent sessions |
-| `--socket-mode <octal>` | `0600` | Socket file permissions |
+| `--socket-mode <octal>` | `0600` | Socket file permissions (applied only to Unix-socket endpoints) |
 | `--allowed-cert-dirs <dirs>` | *(none)* | Comma-separated allowed certificate directories |
 
 Auth token priority: `OPCUA_AUTH_TOKEN` env var > `--auth-token-file` > `--auth-token`.

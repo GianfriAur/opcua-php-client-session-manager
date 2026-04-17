@@ -1,5 +1,55 @@
 # Changelog
 
+## [4.2.0] - 2026-04-17
+
+### Changed
+
+- Bumped minimum `php-opcua/opcua-client` from `^4.1` to `^4.2.0`. Aligns `ManagedClient` with the new Kernel + ServiceModule architecture and unlocks the Wire-serialization pipeline below.
+- Module-specific DTO imports updated: `SubscriptionResult`, `TransferResult`, `MonitoredItemResult`, `MonitoredItemModifyResult`, `PublishResult`, `SetTriggeringResult`, `CallResult`, `BrowsePathResult`, `BrowsePathTarget`, `BrowseResultSet` now live in their module namespaces (`PhpOpcua\Client\Module\*`) rather than `PhpOpcua\Client\Types\*`. Affected files: `Serialization/TypeSerializer.php`, `Client/ManagedClient.php`, and the corresponding unit tests.
+
+### Added
+
+- **Transport-layer abstraction** in `src/Ipc/` to unblock non-Unix-socket IPC (Windows in particular) without touching the wire format:
+  - **`TransportInterface`** — narrow send/receive-line API suitable for NDJSON framing. Opens streams in binary mode so that Windows text-mode `\n` ↔ `\r\n` translation never silently mangles frame boundaries.
+  - **`AbstractStreamTransport`** — shared NDJSON loop on top of a PHP stream resource. Concrete transports only implement `openStream()`.
+  - **`UnixSocketTransport`** — the established default on Linux / macOS. Connects to `unix://<path>`.
+  - **`TcpLoopbackTransport`** — portable alternative. Refuses to bind to anything outside `127.0.0.0/8` or `::1` / `localhost` at construction time, preserving the "trusted local origin" posture that the Unix socket file permissions grant today. Primarily aimed at Windows, where ReactPHP's Unix-socket support is still partial.
+  - **`WireMessageCodec`** — NDJSON-framed typed-envelope codec. Requests: `{id, t: "req", method, args}`, responses: `{id, t: "res", ok: true/false, data | error}`. Rejects frames larger than 16 MiB or nested deeper than 32 levels (DoS gate). Strict on envelope shape so that wire drift is loud instead of silently masked.
+- **Generic method dispatch over IPC — third-party modules work out of the box.** Two new `CommandHandler` commands plus a corresponding `ManagedClient` path turn the daemon into a fully introspectable RPC surface:
+  - **`describe`** — returns `{methods, modules, wireClasses, enumClasses, wireTypeIds}` for the session's underlying client. The ManagedClient caches the response for the lifetime of the session and uses it to populate `hasMethod()` / `hasModule()` / `getRegisteredMethods()` / `getLoadedModules()` without further round-trips.
+  - **`invoke`** — generic dispatch: `{method, args: [<wire-encoded>…]}`. Args are decoded with a `WireTypeRegistry` built from the daemon's `moduleRegistry->buildWireTypeRegistry()`; the result is encoded the same way. Unlike `query`, `invoke` is **not** gated by a static method whitelist — instead, `$client->hasMethod($method)` is the authoritative check, and the wire registry is the authoritative allowlist for typed payload classes. Third-party modules registered on the daemon via `ClientBuilder::addModule()` become callable from `ManagedClient::$name(...)` with no further plumbing.
+  - **`ManagedClient::__call()`** — proxies any method that is not concretely declared (e.g. a custom `acme:queryFirst` provided by a third-party module) through the `invoke` path. Declared methods continue to use the existing typed-command path (`query` + `TypeSerializer`) unchanged — this release is strictly additive.
+  - **NodeManagement methods** (`addNodes`, `deleteNodes`, `addReferences`, `deleteReferences`) — previously guarded by `BadMethodCallException` — now delegate through `invoke`, so they succeed whenever the daemon has opted into `NodeManagementModule` via `ClientBuilder::addModule(new NodeManagementModule())`.
+
+### Security
+- **Loopback-only TCP transport.** `TcpLoopbackTransport` rejects non-loopback hosts at construction time. Remote access — if ever wanted — must be layered explicitly (TLS, SSH tunnel).
+- **Frame size and depth caps** on every decode: 16 MiB per frame and 32-level JSON nesting. Bounded memory even against authenticated but hostile peers.
+- **`invoke` dispatch is gated by `hasMethod`**: only methods the daemon's module set has actually registered are reachable; arbitrary method names are rejected with `unknown_method`.
+
+### Tests
+
+- 37 new unit tests in `tests/Unit/Ipc/` cover framing / codec / transport guard rails, 6 more in `tests/Unit/CommandHandlerDescribeInvokeTest.php` cover the describe / invoke dispatch. 10 additional `TransportFactoryTest` cases + 7 `SessionManagerDaemonTransportTest` cases cover endpoint URI parsing and the loopback-only guard on both sides. 9 `ParamDeserializerRegistryTest` cases + 10 `SessionConfigTest` cases cover the two v4.2.0 refactors below. Full suite: **539 passing, 0 failing** (up from 456).
+- `tests/Unit/SocketConnectionTest.php` and `tests/Unit/ManagedClientIpcTest.php` — the test harness fork-based fake daemons use `pcntl_fork`, so the affected cases are marked `->skipOnWindows()`; the rest of the unit suite runs cross-OS.
+
+### Refactoring
+
+- **`SessionConfig` DTO.** Consumption of the `config` associative array in `CommandHandler::handleOpen()` now goes through a typed readonly `PhpOpcua\SessionManager\Daemon\SessionConfig` DTO (`fromArray` / `toArray` / `sanitized()`). `handleOpen()` no longer reads `$config['opcuaTimeout'] ?? null` / `isset($config['...'])` — every knob is a typed property on the DTO. A dedicated `buildClientFromConfig()` helper consumes the DTO and returns the connected `Client`. Wire format is unchanged (still a plain JSON object for backwards compatibility); the conversion happens at the IPC boundary via `SessionConfig::fromArray()`.
+- **Pluggable param deserializer.** The 200-line `match` that used to live inside `CommandHandler::deserializeParams()` is now a `PhpOpcua\SessionManager\Serialization\ParamDeserializerRegistry` that delegates to one or more `ParamDeserializerInterface` implementations consulted in registration order. The shipped behaviour lives in `BuiltInParamDeserializer`, covering every method in the default whitelist. Third-party modules that register custom service methods on the daemon's client can now ship a matching `ParamDeserializerInterface` and wire it up with `CommandHandler::registerParamDeserializer()` — no more patching the command handler. `CommandHandler` drops its `DateTimeImmutable`, `BrowseDirection`, `NodeClass`, `BuiltinType`, `ConnectionState`, `NodeId` imports as a side effect.
+
+### Windows support
+
+- **`TransportFactory` (new, `src/Ipc/TransportFactory.php`)** — central client-side factory that turns an endpoint string into the correct `TransportInterface`:
+  - `unix:///absolute/path.sock` → `UnixSocketTransport`
+  - `tcp://127.0.0.1:<port>` / `tcp://[::1]:<port>` → `TcpLoopbackTransport` (non-loopback hosts rejected at construction)
+  - scheme-less path → `UnixSocketTransport` (backwards-compatible with the pre-v4.2.0 `--socket /tmp/foo.sock` convention)
+  - `TransportFactory::defaultEndpoint()` picks per-OS: `unix:///tmp/opcua-session-manager.sock` on Linux/macOS, `tcp://127.0.0.1:9990` on Windows
+- **`SocketConnection::send()` rewritten** on top of `TransportInterface` — one code path for every transport; drops ~80 lines of inline socket plumbing.
+- **`SocketConnection::sendVia(TransportInterface, array)`** — new helper for callers that hold a long-lived transport (future pooled connections).
+- **`SessionManagerDaemon` listener accepts both `unix://` and `tcp://` URIs** via `React\Socket\SocketServer`. PID file path is resolved per-transport (next to the socket file for Unix, in `sys_get_temp_dir()` keyed by endpoint slug for TCP). `chmod` + file cleanup run only for Unix endpoints. A construction-time `assertLoopbackIfTcp()` guard refuses any `tcp://0.0.0.0:…` / public-host binding, matching the TCP transport's client-side posture.
+- **`config/defaults.php` default `socket_path`** now uses `TransportFactory::defaultEndpoint()` so deploying on Windows picks up TCP loopback automatically without a config edit.
+- **`bin/opcua-session-manager --help` updated** — `--socket <uri>` now documents the full URI surface and the per-OS default.
+- **CI workflow** — mirrors the `opcua-client` pattern: `unit` job cross-OS on `ubuntu-latest` / `macos-latest` / `windows-latest` × PHP 8.2–8.5 (12 combinations); `integration` job stays Ubuntu-only (Docker-hosted OPC UA servers) with `needs: unit` gating. `[DOC]` commits skip CI. `codecov/codecov-action` bumped from `v5` to `v6`.
+
 ## [4.1.0] - 2026-04-13
 
 ### Added

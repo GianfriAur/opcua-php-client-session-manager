@@ -1,6 +1,6 @@
 # OPC UA Session Manager
 
-> Daemon-based session manager for opcua-client. Keeps OPC UA connections alive across PHP requests via a ReactPHP daemon and Unix socket IPC. ManagedClient is a drop-in replacement for Client — same OpcUaClientInterface, persistent sessions.
+> Daemon-based session manager for opcua-client. Keeps OPC UA connections alive across PHP requests via a ReactPHP daemon and a local IPC channel (Unix domain socket on Linux/macOS, TCP loopback on Windows — auto-selected). ManagedClient is a drop-in replacement for Client — same OpcUaClientInterface, persistent sessions.
 
 ## What is this
 
@@ -26,6 +26,10 @@ A PHP library that solves the OPC UA session persistence problem in PHP's reques
 - PSR-3 Logging: optional logger on ManagedClient
 - PSR-16 Cache: invalidateCache() and flushCache() forwarded to daemon
 - Security hardening: method whitelist (37 methods), IPC auth token, credential stripping, error sanitization, connection limits
+- Third-party module support (v4.2.0): any method registered on the daemon's client by a custom ServiceModule is callable via ManagedClient::$method(...). Args and results travel through a JSON wire codec (PhpOpcua\Client\Wire\WireTypeRegistry) with an explicit type allowlist — no unserialize() on the wire path, zero PHP gadget-chain surface
+- Cross-platform IPC (v4.2.0): TransportInterface + AbstractStreamTransport (NDJSON framing, binary mode) + UnixSocketTransport (Linux/macOS default) + TcpLoopbackTransport (Windows default, loopback-only). TransportFactory auto-selects the right transport from an endpoint URI — unix:///path, tcp://127.0.0.1:port, or scheme-less path (= unix). Default per OS via TransportFactory::defaultEndpoint(). SocketConnection::send() delegates to TransportInterface. Daemon listener (React\Socket\SocketServer) accepts both unix:// and tcp:// URIs; construction-time loopback-only guard rejects any tcp:// bind to a non-loopback host on both client and daemon sides. ManagedClient works on Windows out of the box. WireMessageCodec handles typed envelope encoding with 16 MiB frame cap and 32-level depth cap
+- Typed SessionConfig (v4.2.0): PhpOpcua\SessionManager\Daemon\SessionConfig readonly DTO with fromArray/toArray/sanitized() — CommandHandler::handleOpen() consumes typed fields instead of $config['...'] lookups; SESSION_CONFIG::SENSITIVE_FIELDS lists password/clientKeyPath/caCertPath/userKeyPath. Wire format unchanged for backwards compatibility
+- Pluggable param deserializer (v4.2.0): ParamDeserializerInterface + ParamDeserializerRegistry + BuiltInParamDeserializer — the 200-line `match` previously embedded in CommandHandler is now a registry consulted first-match-wins. Third-party modules register their own deserializer via CommandHandler::registerParamDeserializer() without patching the command handler
 - Auto-retry and auto-batching forwarded to daemon's Client
 - Auto-publish: daemon automatically calls publish() for sessions with subscriptions, dispatching PSR-14 events (DataChangeReceived, EventNotificationReceived, AlarmActivated, etc.)
 - Auto-connect: daemon connects and registers subscriptions at startup from pre-configured connection definitions
