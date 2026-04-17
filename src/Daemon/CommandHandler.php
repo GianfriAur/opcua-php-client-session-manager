@@ -760,7 +760,11 @@ class CommandHandler
 
         foreach ($this->allowedCertDirs as $allowedDir) {
             $realDir = realpath($allowedDir);
-            if ($realDir !== false && str_starts_with($realPath, $realDir . '/')) {
+            if ($realDir === false) {
+                continue;
+            }
+            $prefix = rtrim($realDir, '/\\') . DIRECTORY_SEPARATOR;
+            if (str_starts_with($realPath, $prefix)) {
                 return;
             }
         }

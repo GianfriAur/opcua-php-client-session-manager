@@ -200,6 +200,6 @@ describe('StreamLogger', function () {
             chmod($dir, 0755);
             rmdir($dir);
         }
-    });
+    })->skipOnWindows();
 
 });

@@ -138,4 +138,4 @@ describe('AbstractStreamTransport: NDJSON framing', function () {
         $t->close();
         @fclose($t->peer);
     });
-});
+})->skipOnWindows();
