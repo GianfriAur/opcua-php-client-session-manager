@@ -18,6 +18,9 @@ use PhpOpcua\Client\Types\NodeId;
 use PhpOpcua\Client\Module\Subscription\PublishResult;
 use PhpOpcua\Client\Types\QualifiedName;
 use PhpOpcua\Client\Types\ReferenceDescription;
+use PhpOpcua\Client\Types\ExtensionObject;
+use PhpOpcua\Client\Module\Subscription\MonitoredItemModifyResult;
+use PhpOpcua\Client\Module\Subscription\SetTriggeringResult;
 use PhpOpcua\Client\Module\Subscription\SubscriptionResult;
 use PhpOpcua\Client\Module\Subscription\TransferResult;
 use PhpOpcua\Client\Types\Variant;
@@ -599,6 +602,79 @@ describe('TypeSerializer', function () {
         it('serializes an array of scalars', function () {
             $result = $this->serializer->serialize([1, 2, 3]);
             expect($result)->toBe([1, 2, 3]);
+        });
+
+    });
+
+    describe('MonitoredItemModifyResult', function () {
+
+        it('serializes via serialize() dispatch', function () {
+            $r = new MonitoredItemModifyResult(0, 250.5, 10);
+            $result = $this->serializer->serialize($r);
+
+            expect($result)->toBe([
+                'statusCode' => 0,
+                'revisedSamplingInterval' => 250.5,
+                'revisedQueueSize' => 10,
+            ]);
+        });
+
+    });
+
+    describe('SetTriggeringResult', function () {
+
+        it('serializes via serialize() dispatch', function () {
+            $r = new SetTriggeringResult([0, 0], [0]);
+            $result = $this->serializer->serialize($r);
+
+            expect($result)->toBe([
+                'addResults' => [0, 0],
+                'removeResults' => [0],
+            ]);
+        });
+
+        it('roundtrips through deserializeSetTriggeringResult', function () {
+            $serialized = $this->serializer->serialize(new SetTriggeringResult([0, 0], [0]));
+            $deserialized = $this->serializer->deserializeSetTriggeringResult($serialized);
+
+            expect($deserialized->addResults)->toBe([0, 0]);
+            expect($deserialized->removeResults)->toBe([0]);
+        });
+
+    });
+
+    describe('ExtensionObject', function () {
+
+        it('serializes body as base64', function () {
+            $obj = new ExtensionObject(NodeId::numeric(0, 42), 1, "\x00\x01\x02", null);
+            $result = $this->serializer->serialize($obj);
+
+            expect($result['typeId']['id'])->toBe(42);
+            expect($result['encoding'])->toBe(1);
+            expect($result['body'])->toBe(base64_encode("\x00\x01\x02"));
+            expect($result['value'])->toBeNull();
+        });
+
+        it('roundtrips through deserializeExtensionObject', function () {
+            $original = new ExtensionObject(NodeId::numeric(0, 42), 1, "\x00\x01\x02", null);
+            $serialized = $this->serializer->serialize($original);
+            $deserialized = $this->serializer->deserializeExtensionObject($serialized);
+
+            expect($deserialized->typeId->identifier)->toBe(42);
+            expect($deserialized->encoding)->toBe(1);
+            expect($deserialized->body)->toBe("\x00\x01\x02");
+        });
+
+    });
+
+    describe('deserializeBuiltinType', function () {
+
+        it('returns null when input is null', function () {
+            expect($this->serializer->deserializeBuiltinType(null))->toBeNull();
+        });
+
+        it('returns the BuiltinType enum for valid values', function () {
+            expect($this->serializer->deserializeBuiltinType(BuiltinType::Int32->value))->toBe(BuiltinType::Int32);
         });
 
     });

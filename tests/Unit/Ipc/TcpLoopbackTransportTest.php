@@ -22,6 +22,16 @@ describe('TcpLoopbackTransport', function () {
         expect($t->describeEndpoint())->toBe('tcp://127.0.0.2:9992');
     });
 
+    it('accepts IPv4-mapped IPv6 loopback (::ffff:127.0.0.1)', function () {
+        $t = new TcpLoopbackTransport('::ffff:127.0.0.1', 9993);
+        expect($t->describeEndpoint())->toBe('tcp://[::ffff:127.0.0.1]:9993');
+    });
+
+    it('rejects IPv4-mapped IPv6 non-loopback (::ffff:192.168.1.10)', function () {
+        expect(fn () => new TcpLoopbackTransport('::ffff:192.168.1.10', 9990))
+            ->toThrow(DaemonException::class, 'refuses to bind to non-loopback');
+    });
+
     it('rejects a non-loopback IPv4 address at construction', function () {
         expect(fn () => new TcpLoopbackTransport('192.168.1.10', 9990))
             ->toThrow(DaemonException::class, 'refuses to bind to non-loopback');

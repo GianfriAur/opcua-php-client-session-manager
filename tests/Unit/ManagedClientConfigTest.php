@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 use PhpOpcua\Client\Repository\ExtensionObjectRepository;
+use PhpOpcua\Client\TrustStore\TrustPolicy;
 use PhpOpcua\Client\Types\ConnectionState;
 use PhpOpcua\SessionManager\Client\ManagedClient;
-use Psr\Log\LoggerInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
 use Psr\Log\NullLogger;
 
 describe('ManagedClient Configuration', function () {
@@ -164,6 +165,145 @@ describe('ManagedClient Configuration', function () {
         it('returns an ExtensionObjectRepository instance', function () {
             $client = new ManagedClient();
             expect($client->getExtensionObjectRepository())->toBeInstanceOf(ExtensionObjectRepository::class);
+        });
+
+    });
+
+    describe('Event dispatcher', function () {
+
+        it('returns the eventDispatcher after setting it', function () {
+            $client = new ManagedClient();
+            $dispatcher = new class() implements EventDispatcherInterface {
+                public function dispatch(object $event): object
+                {
+                    return $event;
+                }
+            };
+
+            $result = $client->setEventDispatcher($dispatcher);
+
+            expect($result)->toBe($client);
+            expect($client->getEventDispatcher())->toBe($dispatcher);
+        });
+
+    });
+
+    describe('Trust store / policy', function () {
+
+        it('returns null trust store (not exposed via ManagedClient)', function () {
+            $client = new ManagedClient();
+            expect($client->getTrustStore())->toBeNull();
+        });
+
+        it('returns the configured trust policy (null by default)', function () {
+            $client = new ManagedClient();
+            expect($client->getTrustPolicy())->toBeNull();
+        });
+
+        it('sets trustStorePath fluently', function () {
+            $client = new ManagedClient();
+            $result = $client->setTrustStorePath('/etc/opcua/trust');
+
+            expect($result)->toBe($client);
+        });
+
+        it('sets trustPolicy fluently', function () {
+            $client = new ManagedClient();
+            $result = $client->setTrustPolicy(TrustPolicy::Fingerprint);
+
+            expect($result)->toBe($client);
+            expect($client->getTrustPolicy())->toBe(TrustPolicy::Fingerprint);
+        });
+
+        it('accepts null trustPolicy (reset)', function () {
+            $client = new ManagedClient();
+            $client->setTrustPolicy(TrustPolicy::Fingerprint);
+            $client->setTrustPolicy(null);
+
+            expect($client->getTrustPolicy())->toBeNull();
+        });
+
+    });
+
+    describe('Auto-accept', function () {
+
+        it('enables auto-accept with default force=false', function () {
+            $client = new ManagedClient();
+            $result = $client->autoAccept();
+
+            expect($result)->toBe($client);
+        });
+
+        it('enables auto-accept with force=true', function () {
+            $client = new ManagedClient();
+            $result = $client->autoAccept(true, true);
+
+            expect($result)->toBe($client);
+        });
+
+        it('disables auto-accept', function () {
+            $client = new ManagedClient();
+            $result = $client->autoAccept(false);
+
+            expect($result)->toBe($client);
+        });
+
+    });
+
+    describe('Behavior flags', function () {
+
+        it('sets autoDetectWriteType fluently', function () {
+            $client = new ManagedClient();
+            $result = $client->setAutoDetectWriteType(false);
+
+            expect($result)->toBe($client);
+        });
+
+        it('sets readMetadataCache fluently', function () {
+            $client = new ManagedClient();
+            $result = $client->setReadMetadataCache(true);
+
+            expect($result)->toBe($client);
+        });
+
+    });
+
+    describe('Session introspection', function () {
+
+        it('returns false for wasSessionReused when no session is open', function () {
+            $client = new ManagedClient();
+            expect($client->wasSessionReused())->toBeFalse();
+        });
+
+    });
+
+    describe('Describe introspection (no-session fallback)', function () {
+
+        it('hasMethod falls back to method_exists without a live session', function () {
+            $client = new ManagedClient();
+            expect($client->hasMethod('read'))->toBeTrue();
+            expect($client->hasMethod('browse'))->toBeTrue();
+            expect($client->hasMethod('noSuchMethodAnywhere_12345'))->toBeFalse();
+        });
+
+        it('hasModule returns false without a live session', function () {
+            $client = new ManagedClient();
+            expect($client->hasModule('PhpOpcua\\Client\\Module\\Browse\\BrowseModule'))->toBeFalse();
+        });
+
+        it('getRegisteredMethods falls back to the OpcUaClientInterface surface', function () {
+            $client = new ManagedClient();
+            $names = $client->getRegisteredMethods();
+
+            expect($names)->toBeArray();
+            expect($names)->not->toBeEmpty();
+            expect($names)->toContain('read');
+            expect($names)->toContain('browse');
+        });
+
+        it('getLoadedModules returns an empty array without a live session', function () {
+            $client = new ManagedClient();
+            expect($client->getLoadedModules())->toBe([]);
         });
 
     });

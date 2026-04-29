@@ -366,4 +366,72 @@ describe('CommandHandler deserializeParams', function () {
         expect($result['success'])->toBeTrue();
     });
 
+    it('deserializes modifyMonitoredItems params', function () {
+        $client = $this->createStub(Client::class);
+        $client->method('modifyMonitoredItems')->willReturn([]);
+        $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+        $this->store->create($session);
+
+        $result = $this->handler->handle([
+            'command' => 'query', 'sessionId' => 's1', 'method' => 'modifyMonitoredItems',
+            'params' => [
+                42,
+                [
+                    [
+                        'monitoredItemId' => 1,
+                        'samplingInterval' => 500.0,
+                        'queueSize' => 10,
+                        'clientHandle' => 7,
+                        'discardOldest' => true,
+                    ],
+                    ['monitoredItemId' => 2],
+                ],
+            ],
+        ]);
+
+        expect($result['success'])->toBeTrue();
+    });
+
+    it('deserializes setTriggering params', function () {
+        $client = $this->createStub(Client::class);
+        $client->method('setTriggering')->willReturn(
+            new PhpOpcua\Client\Module\Subscription\SetTriggeringResult([], [])
+        );
+        $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+        $this->store->create($session);
+
+        $result = $this->handler->handle([
+            'command' => 'query', 'sessionId' => 's1', 'method' => 'setTriggering',
+            'params' => [42, 1, [10, 11], [20]],
+        ]);
+
+        expect($result['success'])->toBeTrue();
+    });
+
+    it('deserializes trustCertificate params', function () {
+        $client = $this->createStub(Client::class);
+        $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+        $this->store->create($session);
+
+        $result = $this->handler->handle([
+            'command' => 'query', 'sessionId' => 's1', 'method' => 'trustCertificate',
+            'params' => [base64_encode("\x00\x01DER")],
+        ]);
+
+        expect($result['success'])->toBeTrue();
+    });
+
+    it('deserializes untrustCertificate params', function () {
+        $client = $this->createStub(Client::class);
+        $session = new Session('s1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+        $this->store->create($session);
+
+        $result = $this->handler->handle([
+            'command' => 'query', 'sessionId' => 's1', 'method' => 'untrustCertificate',
+            'params' => ['aa:bb:cc'],
+        ]);
+
+        expect($result['success'])->toBeTrue();
+    });
+
 });

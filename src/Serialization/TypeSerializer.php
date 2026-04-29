@@ -335,7 +335,6 @@ class TypeSerializer
     public function serializeSetTriggeringResult(SetTriggeringResult $result): array
     {
         return [
-            'statusCode' => $result->statusCode,
             'addResults' => $result->addResults,
             'removeResults' => $result->removeResults,
         ];
@@ -572,7 +571,6 @@ class TypeSerializer
     public function deserializeSetTriggeringResult(array $data): SetTriggeringResult
     {
         return new SetTriggeringResult(
-            (int)$data['statusCode'],
             array_map('intval', $data['addResults'] ?? []),
             array_map('intval', $data['removeResults'] ?? []),
         );

@@ -424,6 +424,50 @@ describe('CommandHandler Security', function () {
             expect($result['error']['message'])->toContain('[path]');
         });
 
+        it('strips Windows paths from error messages', function () {
+            $client = $this->createStub(Client::class);
+            $session = new Session('sess1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $client->method('browse')->willThrowException(
+                new RuntimeException('Cannot open C:\\Users\\Admin\\secret.pem')
+            );
+
+            $result = $this->handler->handle([
+                'command' => 'query',
+                'sessionId' => 'sess1',
+                'method' => 'browse',
+                'params' => [['ns' => 0, 'id' => 85, 'type' => 'numeric']],
+            ]);
+
+            expect($result['success'])->toBeFalse();
+            expect($result['error']['message'])->not->toContain('Admin');
+            expect($result['error']['message'])->not->toContain('secret.pem');
+            expect($result['error']['message'])->toContain('[path]');
+        });
+
+        it('strips URLs with embedded credentials from error messages', function () {
+            $client = $this->createStub(Client::class);
+            $session = new Session('sess1', $client, 'opc.tcp://localhost:4840', [], microtime(true));
+            $this->store->create($session);
+
+            $client->method('browse')->willThrowException(
+                new RuntimeException('Connection refused to opc.tcp://admin:pwd@192.168.1.10:4840')
+            );
+
+            $result = $this->handler->handle([
+                'command' => 'query',
+                'sessionId' => 'sess1',
+                'method' => 'browse',
+                'params' => [['ns' => 0, 'id' => 85, 'type' => 'numeric']],
+            ]);
+
+            expect($result['success'])->toBeFalse();
+            expect($result['error']['message'])->not->toContain('pwd');
+            expect($result['error']['message'])->not->toContain('192.168.1.10');
+            expect($result['error']['message'])->toContain('[url]');
+        });
+
     });
 
     // ── Unknown command ───────────────────────────────────────────────

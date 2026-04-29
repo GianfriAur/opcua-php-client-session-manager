@@ -100,6 +100,14 @@ final class TcpLoopbackTransport extends AbstractStreamTransport
             return true;
         }
 
+        $normalized = strtolower($host);
+        if (str_starts_with($normalized, '::ffff:')) {
+            $mapped = substr($normalized, 7);
+            if ($mapped === '127.0.0.1' || str_starts_with($mapped, '127.')) {
+                return filter_var($mapped, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+            }
+        }
+
         return false;
     }
 }

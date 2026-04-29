@@ -723,6 +723,8 @@ class CommandHandler
 
     private function sanitizeErrorMessage(string $message): string
     {
+        $message = preg_replace('#[a-z][a-z0-9+.-]*://[^\s]+#i', '[url]', $message);
+        $message = preg_replace('#[A-Za-z]:\\\\[^\s]+#', '[path]', $message);
         $message = preg_replace('#/[^\s:]+/[^\s:]+#', '[path]', $message);
 
         if (strlen($message) > self::MAX_ERROR_MESSAGE_LENGTH) {

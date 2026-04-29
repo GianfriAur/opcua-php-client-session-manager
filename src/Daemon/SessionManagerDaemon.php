@@ -446,6 +446,10 @@ class SessionManagerDaemon
             return posix_kill($pid, 0);
         }
 
-        return file_exists("/proc/{$pid}");
+        if (is_dir('/proc')) {
+            return file_exists("/proc/{$pid}");
+        }
+
+        return true;
     }
 }
